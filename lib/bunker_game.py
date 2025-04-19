@@ -62,7 +62,11 @@ class Player:
     
     async def generate_character(self, ai_client: G4FClient) -> None:
         """Генерация случайных характеристик персонажа"""
-        self.gender = random.choice(GameData.GENDERS)
+
+        # Генерация пола
+        gender = random.choice(GameData.GENDERS)
+        years_old = random.randint(12, 95)
+        self.gender = f"{gender} ({years_old} лет)"
 
         # Генерация телосложения
         body_type = random.choice(GameData.BODY_TYPES)
@@ -108,8 +112,11 @@ class Player:
         self.description = ""
         self.description = await ai_client.generate_message([
             {"role": "system", "content": "You are a helpful assistant that generates character descriptions for a bunker game. Always respond in User language."},
-            {"role": "user", "content": f"Сгенерируй краткую биографию для персонажа. В ответе оставь только само описание, не пиши ничего от своего имени. В биографию так-же включи: Имя, цвет глаз, цвет волос, цвет кожи. Сгенерируй биографию от лица персонажа. Сгенерируй всё одним предложением. Вот досье персонажа: {self.get_character_card()}"}
-        ])
+            {"role": "user", "content": f"""Сгенерируй краткую биографию для персонажа. 
+В ответе оставь только само описание, не пиши ничего от своего имени.
+В биографию так-же включи: Имя, цвет глаз, цвет волос, цвет кожи (их тоже сделай случайными). 
+Сгенерируй биографию от лица персонажа. Сгенерируй всё одним предложением. 
+Вот досье персонажа, которого нужно сгенерировать: {self.get_character_card()}"""}])
     
     def get_character_card(self) -> str:
         """
@@ -209,10 +216,10 @@ class Bunker:
             self.image_prompt = await self.ai_client.generate_message([
                 {"role": "system", "content": "You are Stable Diffusion prompt generator. Always respond in English"},
                 {"role": "user", "content": f"""Generate a Stable Diffusion prompt for following disaster: {self.disaster_info}
+Describe the nature that is around the bunker, without mentioning the bunker in the prompt.
 Answer only with prompt, without any other text.
 Generate "tags" for the prompt, like "dark, atmospheric, disaster, etc."
-The image should be dark, atmospheric, and show the interior of the bunker with all the mentioned items visible."""}
-            ])
+The image should be dark, atmospheric, and show the interior of the bunker with all the mentioned items visible."""}])
 
             self.image_url = await self.ai_client.generate_image(self.image_prompt)
         except Exception as e:

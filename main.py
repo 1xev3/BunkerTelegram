@@ -858,6 +858,9 @@ class PlayerActionView(discord.ui.View):
         
         # Кнопка для специальной возможности
         self.add_item(SpecialAbilityButton(self.game, self.player))
+        
+        # Кнопка для генерации изображения персонажа
+        self.add_item(GenerateImageButton(self.game, self.player))
 
 # Кнопка для использования специальной способности
 class SpecialAbilityButton(discord.ui.Button):
@@ -980,6 +983,118 @@ class RevealButton(discord.ui.Button):
         except Exception as e:
             logger.error(f"Ошибка при раскрытии характеристики: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
+
+# Кнопка для генерации изображения персонажа
+class GenerateImageButton(discord.ui.Button):
+    """Кнопка для генерации изображения персонажа"""
+    
+    def __init__(self, game: BunkerGame, player: Player):
+        """
+        Инициализация кнопки
+        
+        Args:
+            game: Объект игры
+            player: Объект игрока
+        """
+        super().__init__(
+            label="Сгенерировать изображение", 
+            style=discord.ButtonStyle.primary, 
+            custom_id="generate_image",
+            row=4
+        )
+        self.game = game
+        self.player = player
+        self.used = False
+        self.is_generating = False
+    
+    async def update_button_state(self, interaction: discord.Interaction, success: bool = None):
+        """Обновляет состояние кнопки"""
+        if success is None:
+            # Состояние генерации
+            self.label = "🔄 Генерация..."
+            self.style = discord.ButtonStyle.secondary
+            self.disabled = True
+        elif success:
+            # Успешная генерация
+            self.label = "✅ Изображение сгенерировано"
+            self.style = discord.ButtonStyle.success
+            self.disabled = True
+            self.used = True
+        else:
+            # Ошибка генерации
+            self.label = "❌ Ошибка генерации"
+            self.style = discord.ButtonStyle.danger
+            self.disabled = False
+            self.is_generating = False
+        
+        await interaction.message.edit(view=self.view)
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Обработчик нажатия на кнопку генерации изображения"""
+        try:
+            # Отложенный ответ
+            await interaction.response.defer(ephemeral=True)
+            
+            # Проверка, что изображение еще не сгенерировано
+            if self.used:
+                await interaction.followup.send("Вы уже сгенерировали изображение персонажа!", ephemeral=True)
+                return
+            
+            # Проверка, что не идет процесс генерации
+            if self.is_generating:
+                await interaction.followup.send("Генерация изображения уже запущена, пожалуйста, подождите...", ephemeral=True)
+                return
+            
+            # Проверка, что игра активна
+            if self.game.status != "running":
+                await interaction.followup.send("Игра еще не началась или уже завершена!", ephemeral=True)
+                return
+            
+            # Устанавливаем флаг генерации и обновляем кнопку
+            self.is_generating = True
+            await self.update_button_state(interaction)
+            
+            # Отправляем сообщение о начале генерации
+            await interaction.followup.send("🔄 Начинаю генерацию изображения вашего персонажа...", ephemeral=True)
+            
+            # Создание промпта для генерации изображения
+            logger.info(f"Генерация изображения для персонажа {self.player.name}")
+            prompt = await self.game.ai_client.generate_message([
+                {"role": "system", "content": "You are Stable Diffusion prompt generator. Always respond in English"},
+                {"role": "user", "content": f"""Generate a Stable Diffusion prompt for following person: {self.player.get_character_card()}
+Answer only with prompt, without any other text.
+Describe person with "tags" like "A woman 38 years old, blonde hair, blue eyes, etc."
+"""}])
+            
+            # Генерация изображения
+            try:
+                image_url = await self.game.ai_client.generate_image(prompt)
+                
+                # Создание эмбеда с изображением
+                embed = discord.Embed(
+                    title="🎨 Изображение вашего персонажа",
+                    description=prompt,
+                    color=discord.Color.blue()
+                )
+                embed.set_image(url=image_url)
+                
+                # Отправка изображения
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                
+                # Обновляем состояние кнопки на успешное
+                await self.update_button_state(interaction, success=True)
+                
+                logger.info(f"Сгенерировано изображение для персонажа игрока {self.player.name}")
+            except Exception as e:
+                logger.error(f"Ошибка при генерации изображения: {e}", exc_info=True)
+                await interaction.followup.send("Произошла ошибка при генерации изображения. Попробуйте позже.", ephemeral=True)
+                # Обновляем состояние кнопки на ошибку
+                await self.update_button_state(interaction, success=False)
+        except Exception as e:
+            logger.error(f"Ошибка при обработке кнопки генерации изображения: {e}", exc_info=True)
+            await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
+            # Обновляем состояние кнопки на ошибку
+            await self.update_button_state(interaction, success=False)
 
 # Запуск бота
 if __name__ == "__main__":
