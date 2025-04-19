@@ -127,6 +127,37 @@ async def start_game(interaction: discord.Interaction):
         logger.error(f"Ошибка при создании игры: {e}", exc_info=True)
         await interaction.followup.send("Произошла ошибка при создании игры. Попробуйте позже.", ephemeral=True)
 
+@bot.tree.command(name="analyze", description="Проанализировать шансы выживания текущего состава бункера")
+async def analyze_survival(interaction: discord.Interaction):
+    """Команда для анализа шансов выживания группы в бункере"""
+    channel = interaction.channel
+    
+    # Проверка на существование активной игры в этом канале
+    if channel.id not in active_games:
+        await interaction.response.send_message("В этом канале нет активной игры.", ephemeral=True)
+        return
+    
+    game = active_games[channel.id]
+    
+    # Проверка, что игра запущена
+    if game.status != "running":
+        await interaction.response.send_message("Игра должна быть в активном состоянии для проведения анализа.", ephemeral=True)
+        return
+    
+    # Проверка, что пользователь является администратором игры
+    if interaction.user.id != game.admin_id:
+        await interaction.response.send_message("Только администратор игры может запустить анализ.", ephemeral=True)
+        return
+    
+    await interaction.response.send_message("🧠 Запускаю анализ выживания в бункере...", ephemeral=True)
+    
+    try:
+        await game.analyze_bunker_survival(bot)
+        await interaction.followup.send("Анализ успешно выполнен!", ephemeral=True)
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении анализа: {e}", exc_info=True)
+        await interaction.followup.send(f"Произошла ошибка при выполнении анализа: {e}", ephemeral=True)
+
 # Класс для кнопки присоединения к игре
 class JoinGameView(discord.ui.View):
     """Класс представления с кнопкой для присоединения к игре"""
@@ -375,20 +406,7 @@ class AdminControlView(discord.ui.View):
             await interaction.response.defer(ephemeral=True)
             
             # Завершение игры
-            self.game.status = "finished"
-            
-            # Уведомление в канале
-            channel = bot.get_channel(self.game.channel_id)
-            
-            # Подсчет активных игроков
-            active_players = self.game.get_active_players()
-            player_names = ", ".join([p.name for p in active_players])
-            
-            await channel.send(f"Игра завершена! Выжившие в бункере: {player_names}")
-            
-            # Удаление игры из активных
-            if self.game.channel_id in active_games:
-                del active_games[self.game.channel_id]
+            await self.game.end_game(bot, reason="Администратор завершил игру")
             
             await interaction.followup.send("Вы завершили игру.", ephemeral=True)
             
@@ -404,10 +422,38 @@ class AdminControlView(discord.ui.View):
             except discord.NotFound:
                 logger.warning("Сообщение администратора не найдено")
             
-            logger.info(f"Игра в канале {self.game.channel_id} завершена")
+            logger.info(f"Игра в канале {self.game.channel_id} завершена администратором")
         except Exception as e:
             logger.error(f"Ошибка при завершении игры: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
+    
+    # @discord.ui.button(label="Анализ выживания", style=discord.ButtonStyle.primary, custom_id="analyze_survival", row=2)
+    # async def analyze_survival_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    #     """Обработчик нажатия кнопки анализа выживания"""
+    #     try:
+    #         # Отложенный ответ
+    #         await interaction.response.defer(ephemeral=True)
+            
+    #         # Проверка, запущена ли игра
+    #         if self.game.status != "running":
+    #             await interaction.followup.send("Игра еще не запущена или уже завершена!", ephemeral=True)
+    #             return
+            
+    #         await interaction.followup.send("🧠 Запускаю анализ выживания в бункере...", ephemeral=True)
+            
+    #         # Уведомление в канал
+    #         channel = bot.get_channel(self.game.channel_id)
+    #         if channel:
+    #             await channel.send("🧠 Администратор запустил анализ шансов выживания группы в бункере...")
+            
+    #         # Запуск анализа выживания
+    #         await self.game.analyze_bunker_survival(bot)
+            
+    #         await interaction.followup.send("Анализ выживания успешно выполнен!", ephemeral=True)
+    #         logger.info(f"Выполнен анализ выживания для игры в канале {self.game.channel_id}")
+    #     except Exception as e:
+    #         logger.error(f"Ошибка при анализе выживания: {e}", exc_info=True)
+    #         await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
     
     async def _update_admin_controls(self, interaction: discord.Interaction) -> None:
         """
@@ -725,32 +771,9 @@ class PlayerVoteSelect(discord.ui.Select):
                 active_players = self.game.get_active_players()
                 if len(active_players) == 1:
                     winner = active_players[0]
-                    winner_embed = discord.Embed(
-                        title="🏆 Игра завершена!",
-                        description=f"**{winner.name}** - единственный выживший в бункере! Поздравляем с победой!",
-                        color=discord.Color.gold()
-                    )
-                    await channel.send(embed=winner_embed)
-                    
-                    # Отправляем уведомление о победе победителю в ЛС
-                    try:
-                        winner_user = bot.get_user(winner.id)
-                        if winner_user:
-                            dm_channel = await winner_user.create_dm()
-                            winner_dm_embed = discord.Embed(
-                                title="🏆 Поздравляем с победой!",
-                                description="Вы стали единственным выжившим в бункере!",
-                                color=discord.Color.gold()
-                            )
-                            await dm_channel.send(embed=winner_dm_embed)
-                    except Exception as e:
-                        logger.error(f"Ошибка при отправке уведомления победителю: {e}", exc_info=True)
-                    
-                    # Завершаем игру
-                    self.game.status = "finished"
-                    if self.game.channel_id in active_games:
-                        del active_games[self.game.channel_id]
-                    logger.info(f"Игра завершена победой игрока {winner.name} в канале {self.channel_id}")
+                    # Завершаем игру с указанием победителя
+                    await self.game.end_game(bot, winner=winner)
+                    logger.info(f"Игра завершена победой игрока {winner.name} в канале {self.game.channel_id}")
         except Exception as e:
             logger.error(f"Ошибка при автоматическом завершении голосования: {e}", exc_info=True)
 
@@ -873,17 +896,8 @@ class AdminVoteControlView(discord.ui.View):
                 active_players = self.game.get_active_players()
                 if len(active_players) == 1:
                     winner = active_players[0]
-                    winner_embed = discord.Embed(
-                        title="🏆 Игра завершена!",
-                        description=f"**{winner.name}** - единственный выживший в бункере! Поздравляем с победой!",
-                        color=discord.Color.gold()
-                    )
-                    await channel.send(embed=winner_embed)
-                    
-                    # Завершаем игру
-                    self.game.status = "finished"
-                    if self.game.channel_id in active_games:
-                        del active_games[self.game.channel_id]
+                    # Завершаем игру с указанием победителя
+                    await self.game.end_game(bot, winner=winner)
                     logger.info(f"Игра завершена победой игрока {winner.name} в канале {self.game.channel_id}")
                 
                 await interaction.followup.send(f"Голосование завершено. Игрок {exile_player.name} исключен из бункера.", ephemeral=True)
@@ -937,7 +951,7 @@ class PlayerActionView(discord.ui.View):
             self.add_item(RevealButton(label, attr))
         
         # Кнопка для специальной возможности
-        self.add_item(SpecialAbilityButton(self.game, self.player))
+        # self.add_item(SpecialAbilityButton(self.game, self.player))
         
         # Кнопка для генерации изображения персонажа
         self.add_item(GenerateImageButton(self.game, self.player))

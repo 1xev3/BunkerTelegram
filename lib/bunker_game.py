@@ -5,6 +5,8 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import os
 from io import BytesIO
+import logging
+import re
 
 from lib.ai_client import G4FClient
 from lib.game_data import GameData
@@ -142,7 +144,8 @@ class Player:
             {"role": "system", "content": "You are a helpful assistant that generates character descriptions for a bunker game. Always respond in User language."},
             {"role": "user", "content": f"""Сгенерируй краткую биографию для персонажа. 
 В ответе оставь только само описание, не пиши ничего от своего имени.
-В биографию так-же включи: Имя, цвет глаз, цвет волос, цвет кожи (их тоже сделай случайными). 
+В биографию так-же включи: Имя, цвет глаз, цвет волос, цвет кожи (их тоже сделай случайными (НЕ ПУСТЫМИ!)).
+Никогда не оставляй пустые поля! 
 Сгенерируй биографию от лица персонажа. Сгенерируй всё одним предложением. 
 Вот досье персонажа, которого нужно сгенерировать: {self.get_character_card()}"""}])
     
@@ -210,6 +213,7 @@ class Player:
         return None
 
 
+
 class Bunker:
     """Класс, представляющий бункер в игре"""
     
@@ -240,8 +244,9 @@ class Bunker:
 В ответе укажи название катаклизма, его описание и последствия."""}])
 
         # Генерация изображения бункера
-        try:
-            self.image_prompt = await self.ai_client.generate_message([
+        if GameData.GENERATE_IMAGE:
+            try:
+                self.image_prompt = await self.ai_client.generate_message([
                 {"role": "system", "content": "You are Stable Diffusion prompt generator. Always respond in English"},
                 {"role": "user", "content": f"""Generate a Stable Diffusion prompt for following disaster: {self.disaster_info}
 Describe the nature that is around the bunker, without mentioning the bunker in the prompt.
@@ -249,11 +254,11 @@ Answer only with prompt, without any other text.
 Generate "tags" for the prompt, like "dark, atmospheric, disaster, etc."
 The image should be dark, atmospheric, and show the interior of the bunker with all the mentioned items visible."""}])
 
-            self.image_url = await self.ai_client.generate_image(self.image_prompt)
-        except Exception as e:
-            print(f"Ошибка при генерации изображения бункера: {e}")
-            self.image_url = None
-    
+                self.image_url = await self.ai_client.generate_image(self.image_prompt)
+            except Exception as e:
+                print(f"Ошибка при генерации изображения бункера: {e}")
+                self.image_url = None
+        
     def get_description(self) -> str:
         """
         Получение форматированного описания бункера
@@ -686,4 +691,240 @@ class BunkerGame:
         results = {}
         for target_id in self.votes.values():
             results[target_id] = results.get(target_id, 0) + 1
-        return results 
+        return results
+
+    async def end_game(self, bot, winner=None, reason="") -> None:
+        """
+        Единый метод для завершения игры
+        
+        Args:
+            bot: Объект бота Discord
+            winner: Опциональный объект игрока-победителя
+            reason: Причина завершения игры
+        """
+        try:
+            # Импортируем локально для избежания циклического импорта
+            logger = logging.getLogger('bunker_game')
+            
+            # Изменение статуса игры
+            self.status = "finished"
+            
+            # Получение канала
+            channel = bot.get_channel(self.channel_id)
+            if not channel:
+                logger.error(f"Ошибка: канал {self.channel_id} не найден при завершении игры")
+                return
+            
+            # Если есть победитель, отправляем уведомление о победе
+            if winner:
+                winner_embed = discord.Embed(
+                    title="🏆 Игра завершена!",
+                    description=f"**{winner.name}** - единственный выживший в бункере! Поздравляем с победой!",
+                    color=discord.Color.gold()
+                )
+                await channel.send(embed=winner_embed)
+                
+                # Отправляем уведомление о победе победителю в ЛС
+                try:
+                    winner_user = bot.get_user(winner.id)
+                    if winner_user:
+                        dm_channel = await winner_user.create_dm()
+                        winner_dm_embed = discord.Embed(
+                            title="🏆 Поздравляем с победой!",
+                            description="Вы стали единственным выжившим в бункере!",
+                            color=discord.Color.gold()
+                        )
+                        await dm_channel.send(embed=winner_dm_embed)
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке уведомления победителю: {e}")
+            else:
+                # Если нет конкретного победителя, просто объявляем о завершении
+                active_players = self.get_active_players()
+                player_names = ", ".join([p.name for p in active_players])
+                
+                end_embed = discord.Embed(
+                    title="🏁 Игра завершена!",
+                    description=f"Игра 'Бункер' завершена. Выжившие в бункере: {player_names}",
+                    color=discord.Color.blue()
+                )
+                
+                if reason:
+                    end_embed.description += f"\n\nПричина завершения: {reason}"
+                
+                await channel.send(embed=end_embed)
+            
+            # Удаляем игру из словаря активных игр
+            # Используем функцию globals() для доступа к глобальной переменной из импортирующего модуля
+            # Это будет работать, только если переменная active_games доступна в глобальном пространстве имен
+            try:
+                import sys
+                main_module = sys.modules.get('__main__')
+                if hasattr(main_module, 'active_games') and self.channel_id in main_module.active_games:
+                    del main_module.active_games[self.channel_id]
+                    logger.info(f"Игра удалена из списка активных игр в канале {self.channel_id}")
+            except Exception as e:
+                logger.error(f"Не удалось удалить игру из списка активных: {e}")
+            
+            logger.info(f"Игра в канале {self.channel_id} завершена" + (f": {reason}" if reason else ""))
+            
+            # Запускаем анализ выживания в бункере с оставшимися игроками
+            if self.get_active_players():
+                await channel.send("🧠 А теперь посмотрим, как нейросеть оценивает шансы этой группы на выживание...")
+                await self.analyze_bunker_survival(bot)
+        except Exception as e:
+            logger.error(f"Ошибка при завершении игры: {e}")
+
+    async def analyze_bunker_survival(self, bot) -> None:
+        """
+        Анализ с помощью нейросети шансов выживания бункера с текущим составом игроков
+        
+        Args:
+            bot: Объект бота Discord для отправки сообщений
+        """
+        try:
+            # Получаем канал
+            channel = bot.get_channel(self.channel_id)
+            if not channel:
+                return
+            
+            # Получаем только активных игроков
+            active_players = self.get_active_players()
+            if not active_players:
+                await channel.send("Некому выживать в бункере!")
+                return
+            
+            # Уведомление о начале анализа
+            analyzing_message = await channel.send("🔍 Анализирую шансы выживания обитателей бункера...")
+            
+            # Формируем полную информацию о бункере
+            bunker_info = self.bunker.get_description()
+            
+            # Формируем информацию о выживших (используем полные данные)
+            survivors_info = []
+            for i, player in enumerate(active_players, 1):
+                # Используем полную информацию о персонаже
+                player_card = player.get_character_card()
+                survivors_info.append(f"**Игрок {i}: {player.name}**\n{player_card}")
+            
+            survivors_text = "\n\n".join(survivors_info)
+            
+            # Формируем общий промпт для нейросети
+            prompt = f"""Проанализируй шансы на выживание группы людей в бункере при данных условиях.
+            
+ИНФОРМАЦИЯ О КАТАСТРОФЕ И БУНКЕРЕ:
+{bunker_info}
+
+ИНФОРМАЦИЯ О ВЫЖИВШИХ В БУНКЕРЕ ({len(active_players)} человек):
+{survivors_text}
+
+Оцени по следующим критериям:
+1. Вероятность выживания группы (в процентах)
+2. Основные преимущества данной группы
+3. Основные недостатки и риски
+4. Какие конфликты могут возникнуть между обитателями бункера
+5. Общий вердикт: выживут или нет
+
+Дай подробный анализ.
+"""
+            
+            # Отправляем запрос нейросети
+            survival_analysis = await self.ai_client.generate_message([
+                {"role": "system", "content": "Ты эксперт по выживанию. Анализируешь шансы выжить группе людей в бункере в условиях постапокалипсиса. Отвечай подробно, учитывай совместимость профессий, навыков и особенностей людей."},
+                {"role": "user", "content": prompt}
+            ])
+            
+            # Удаляем сообщение о процессе анализа
+            try:
+                await analyzing_message.delete()
+            except:
+                pass
+            
+            # Отправляем результат, разбивая на части при необходимости
+            await self._send_analysis_results(channel, survival_analysis)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger('bunker_game')
+            logger.error(f"Ошибка при анализе выживания бункера: {e}")
+            try:
+                await channel.send(f"Произошла ошибка при анализе выживания: {e}")
+            except:
+                pass
+    
+    async def _send_analysis_results(self, channel, analysis_text):
+        """
+        Отправляет результаты анализа в канал, разбивая на несколько сообщений при необходимости
+        
+        Args:
+            channel: Канал Discord для отправки
+            analysis_text: Текст анализа от нейросети
+        """
+        # Максимальная длина текста в одном embed
+        MAX_EMBED_LENGTH = 1000
+        
+        # Заголовок для embed
+        title = "🔍 Анализ выживания в бункере"
+        
+        # Разбиваем текст на части, если он слишком длинный
+        if len(analysis_text) <= MAX_EMBED_LENGTH:
+            # Если текст короткий, отправляем одним сообщением
+            embed = discord.Embed(
+                title=title,
+                description=analysis_text,
+                color=discord.Color.blue()
+            )
+            await channel.send(embed=embed)
+        else:
+            # Разбиваем текст на равномерные части, стараясь не разрывать предложения
+            parts = []
+            
+            # Сначала делим текст на предложения, чтобы не разрывать их
+            # Примитивное разделение по точкам, восклицательным и вопросительным знакам
+            sentences = re.split(r'(?<=[.!?]) +', analysis_text)
+            
+            current_part = ""
+            
+            for sentence in sentences:
+                # Если предложение само по себе длиннее MAX_EMBED_LENGTH, его придется разбить
+                if len(sentence) > MAX_EMBED_LENGTH:
+                    # Если в текущей части уже что-то есть, сохраняем её
+                    if current_part:
+                        parts.append(current_part)
+                        current_part = ""
+                    
+                    # Разбиваем длинное предложение по словам
+                    words = sentence.split()
+                    temp_part = ""
+                    
+                    for word in words:
+                        if len(temp_part) + len(word) + 1 <= MAX_EMBED_LENGTH:
+                            temp_part += (word + " ")
+                        else:
+                            parts.append(temp_part.strip())
+                            temp_part = word + " "
+                    
+                    if temp_part:
+                        current_part = temp_part.strip()
+                else:
+                    # Если добавление предложения превысит лимит, начинаем новую часть
+                    if len(current_part) + len(sentence) + 1 > MAX_EMBED_LENGTH:
+                        parts.append(current_part)
+                        current_part = sentence
+                    else:
+                        if current_part:
+                            current_part += " " + sentence
+                        else:
+                            current_part = sentence
+            
+            # Добавляем последнюю часть
+            if current_part:
+                parts.append(current_part)
+            
+            # Отправляем каждую часть как отдельный embed
+            for i, part in enumerate(parts):
+                part_title = f"{title} (Часть {i+1}/{len(parts)})"
+                embed = discord.Embed(
+                    title=part_title,
+                    description=part,
+                    color=discord.Color.blue()
+                )
+                await channel.send(embed=embed) 
