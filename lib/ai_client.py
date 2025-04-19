@@ -73,8 +73,8 @@ class G4FClient(AIClient):
             params = txt2img_params()
             params.prompt = f"masterpiece,best quality,amazing quality, {prompt}"
             params.negative_prompt = "bad quality, worst quality, worst detail, censor, signature"
-            params.width = 832
-            params.height = 1216
+            params.width = 1216
+            params.height = 832
             params.batch_size = 1
             params.n_iter = 1
             
@@ -82,7 +82,7 @@ class G4FClient(AIClient):
             return result.image
         except Exception as e:
             logger.error(f"Error generating image: {e}")
-            
+
             response = await self.image_client.images.generate(
                 model=self.image_model,
                 prompt=prompt,
