@@ -65,13 +65,32 @@ class Player:
 
         # Генерация пола
         gender = random.choice(GameData.GENDERS)
-        years_old = random.randint(12, 95)
+        years_old = random.randint(16, 95)
         self.gender = f"{gender} ({years_old} лет)"
 
         # Генерация телосложения
-        body_type = random.choice(GameData.BODY_TYPES)
-        body_height = int(np.random.normal(180, 15))  # Mean=180, std=15 gives most heights between 150-210
-        body_height = max(150, min(210, body_height))  # Clamp between 150-210 cm
+        body_type = weighed_random(GameData.BODY_TYPES)
+        
+        # Генерация роста в зависимости от возраста
+        if years_old < 18:
+            # Для подростков: средний рост с большим разбросом
+            body_height = int(np.random.normal(160, 20))
+        elif years_old < 30:
+            # Для молодых взрослых: высокий средний рост
+            body_height = int(np.random.normal(180, 15))
+        elif years_old < 50:
+            # Для среднего возраста: средний рост
+            body_height = int(np.random.normal(175, 10))
+        else:
+            # Для пожилых: немного ниже среднего роста
+            body_height = int(np.random.normal(170, 8))
+        
+        # Корректировка роста в зависимости от пола
+        if gender == "Женщина":
+            body_height -= 10  # В среднем женщины ниже мужчин на 10 см
+        
+        # Ограничение роста разумными пределами
+        body_height = max(150, min(210, body_height))
         self.body_type = f"{body_type} ({body_height} см)"
         self.trait = random.choice(GameData.TRAITS)
         
@@ -339,18 +358,24 @@ class ImageGenerator:
                     header_font = ImageFont.load_default()
                     cell_font = ImageFont.load_default()
             
-            # Определяем колонки и их базовые ширины
+            # Определяем колонки
             columns = ["Игрок", "Пол", "Тело", "Черта", "Проф.", "Здоровье", "Хобби", "Фобия", "Инв.", "Рюкзак", "Доп."]
-            column_widths = [150, 80, 100, 100, 100, 100, 100, 100, 100, 100, 100]
             
-            # Рассчитываем размеры изображения
-            padding = 10
-            header_height = 40
-            min_cell_height = 30  # Минимальная высота ячейки
+            # Определяем максимальные ширины для каждой колонки
+            max_column_widths = [200, 100, 150, 150, 150, 150, 150, 150, 150, 200, 200]
             
-            # Подготавливаем данные игроков и рассчитываем необходимую высоту для каждого ряда
+            # Рассчитываем минимальные ширины колонок на основе заголовков
+            min_column_widths = []
+            for column in columns:
+                if hasattr(header_font, 'getbbox'):
+                    width = header_font.getbbox(column)[2]
+                else:
+                    width = header_font.getsize(column)[0]
+                min_column_widths.append(width + 20)  # Добавляем отступ
+            
+            # Подготавливаем данные игроков и рассчитываем необходимую ширину для каждой колонки
             player_data_rows = []
-            row_heights = []
+            column_widths = min_column_widths.copy()
             
             for player in active_players:
                 # Получаем данные игрока
@@ -369,12 +394,29 @@ class ImageGenerator:
                 ]
                 player_data_rows.append(player_data)
                 
-                # Рассчитываем максимальную высоту ячеек в ряду
+                # Обновляем ширину колонок на основе содержимого ячеек
+                for i, data in enumerate(player_data):
+                    if hasattr(cell_font, 'getbbox'):
+                        width = cell_font.getbbox(data)[2]
+                    else:
+                        width = cell_font.getsize(data)[0]
+                    # Устанавливаем ширину колонки, но не больше максимальной
+                    column_widths[i] = min(max(column_widths[i], width + 20), max_column_widths[i])
+            
+            # Рассчитываем размеры изображения
+            padding = 10
+            header_height = 40
+            min_cell_height = 30  # Минимальная высота ячейки
+            
+            # Рассчитываем высоту для каждого ряда
+            row_heights = []
+            
+            for player_data in player_data_rows:
                 max_height = min_cell_height
                 for i, data in enumerate(player_data):
+                    # Используем установленную ширину колонки для переноса текста
                     lines, height = ImageGenerator.wrap_text(data, column_widths[i] - 10, cell_font)
                     max_height = max(max_height, height + 10)  # Добавляем отступ
-                
                 row_heights.append(max_height)
             
             # Общая ширина изображения

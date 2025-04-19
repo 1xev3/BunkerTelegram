@@ -76,33 +76,56 @@ async def start_game(interaction: discord.Interaction):
         await interaction.response.send_message("В этом канале уже идет игра. Дождитесь её окончания или используйте другой канал.", ephemeral=True)
         return
     
-    # Создание новой игры
-    game = BunkerGame(ai_client, interaction.user.id, channel.id)
-    active_games[channel.id] = game
+    # Отправляем сообщение о начале генерации бункера
+    await interaction.response.send_message("🔄 Генерирую бункер...", ephemeral=True)
     
-    # Создание эмбеда для приглашения игроков
-    embed = discord.Embed(
-        title="🚨 Игра Бункер началась! 🚨",
-        description="Нажмите кнопку ниже, чтобы присоединиться к игре.\n\nУчастники:",
-        color=discord.Color.red()
-    )
-    
-    # Добавление создателя игры как первого участника
-    player = Player(interaction.user.id, interaction.user.name)
-    game.add_player(player)
-    embed.description += f"\n1. {interaction.user.name}"
-    
-    # Создание кнопки для присоединения
-    view = JoinGameView(game)
-    
-    await interaction.response.send_message(embed=embed, view=view)
-    message = await interaction.original_response()
-    game.message_id = message.id
-    
-    # Отправка управления администратору
-    await send_admin_controls(interaction.user, game)
-    
-    logger.info(f"Создана новая игра в канале {channel.id} пользователем {interaction.user.name}")
+    try:
+        # Создание новой игры
+        game = BunkerGame(ai_client, interaction.user.id, channel.id)
+        
+        # Генерация бункера до начала игры
+        await game.generate_bunker()
+        
+        # Сохраняем игру в активных
+        active_games[channel.id] = game
+        
+        # Создание эмбеда для приглашения игроков
+        embed = discord.Embed(
+            title="🚨 Игра Бункер началась! 🚨",
+            description="Нажмите кнопку ниже, чтобы присоединиться к игре.\n\nУчастники:",
+            color=discord.Color.red()
+        )
+        
+        # Добавление создателя игры как первого участника
+        player = Player(interaction.user.id, interaction.user.name)
+        game.add_player(player)
+        embed.description += f"\n1. {interaction.user.name}"
+        
+        # Создание кнопки для присоединения
+        view = JoinGameView(game)
+        
+        # Отправляем сообщение с информацией о бункере
+        bunker_embed = discord.Embed(
+            title="🏢 Информация о бункере",
+            description=game.bunker.get_description(),
+            color=discord.Color.gold()
+        )
+        
+        # Если есть изображение бункера, добавляем его
+        if game.bunker.image_url:
+            bunker_embed.set_image(url=game.bunker.image_url)
+        
+        await channel.send(embed=bunker_embed)
+        message = await channel.send(embed=embed, view=view)
+        game.message_id = message.id
+        
+        # Отправка управления администратору
+        await send_admin_controls(interaction.user, game)
+        
+        logger.info(f"Создана новая игра в канале {channel.id} пользователем {interaction.user.name}")
+    except Exception as e:
+        logger.error(f"Ошибка при создании игры: {e}", exc_info=True)
+        await interaction.followup.send("Произошла ошибка при создании игры. Попробуйте позже.", ephemeral=True)
 
 # Класс для кнопки присоединения к игре
 class JoinGameView(discord.ui.View):
@@ -211,18 +234,16 @@ class AdminControlView(discord.ui.View):
             await interaction.response.defer(ephemeral=True)
             
             # Проверка, достаточно ли игроков
-            if len(self.game.players) < 1:#if len(self.game.players) < 2:
+            if len(self.game.players) < 1:
                 await interaction.followup.send("Для начала игры нужно минимум 2 игрока!", ephemeral=True)
                 return
             
             channel = bot.get_channel(self.game.channel_id)
-            await channel.send("Генерация бункера...")
             
             # Изменение состояния игры
             self.game.status = "running"
             
-            # Генерация бункера и персонажей
-            await self.game.generate_bunker()
+            # Генерация персонажей (бункер уже сгенерирован)
             await self.game.generate_player_cards()
             
             # Уведомление в канале
@@ -417,19 +438,6 @@ class AdminControlView(discord.ui.View):
     
     async def send_game_info_to_players(self) -> None:
         """Отправка информации о бункере и картах персонажей каждому игроку"""
-        # Отправка изображения бункера в общий чат
-        channel = bot.get_channel(self.game.channel_id)
-        if self.game.bunker.image_url:
-            try:
-                bunker_embed = discord.Embed(
-                    title=":palm_tree: Изображение внешней среды",
-                    description=f"{self.game.bunker.image_prompt}",
-                    color=discord.Color.gold()
-                )
-                bunker_embed.set_image(url=self.game.bunker.image_url)
-                await channel.send(embed=bunker_embed)
-            except Exception as e:
-                logger.error(f"Ошибка при отправке изображения бункера: {e}")
 
         for player in self.game.players:
             user = bot.get_user(player.id)
@@ -441,6 +449,17 @@ class AdminControlView(discord.ui.View):
                         description=self.game.bunker.get_description(),
                         color=discord.Color.gold()
                     )
+                    
+                    # Если есть изображение бункера, добавляем его в ЛС
+                    if self.game.bunker.image_url:
+                        bunker_image_embed = discord.Embed(
+                            title=":palm_tree: Изображение внешней среды",
+                            description=f"{self.game.bunker.image_prompt}",
+                            color=discord.Color.gold()
+                        )
+                        bunker_image_embed.set_image(url=self.game.bunker.image_url)
+                        dm_channel = await user.create_dm()
+                        await dm_channel.send(embed=bunker_image_embed)
                     
                     # Информация о персонаже
                     player_embed = discord.Embed(
@@ -622,6 +641,23 @@ class PlayerVoteSelect(discord.ui.Select):
                 
                 await channel.send(embed=result_embed)
                 
+                # Отправляем результаты всем игрокам в ЛС
+                for player in self.game.players:
+                    try:
+                        user = bot.get_user(player.id)
+                        if user:
+                            dm_channel = await user.create_dm()
+                            player_result_embed = discord.Embed(
+                                title="🗳️ Результаты голосования",
+                                description=f"Голосование завершено, но нет однозначного результата.\n"
+                                          f"У следующих игроков одинаковое количество голосов ({max_votes}):\n" +
+                                          "\n".join([f"• {name}" for name in candidate_names]),
+                                color=discord.Color.blue()
+                            )
+                            await dm_channel.send(embed=player_result_embed)
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке результатов игроку {player.name}: {e}", exc_info=True)
+                
                 # Уведомляем администратора, что нужно провести новое голосование
                 admin = bot.get_user(self.game.admin_id)
                 if admin:
@@ -647,6 +683,7 @@ class PlayerVoteSelect(discord.ui.Select):
                 # Исключаем игрока
                 exile_player.is_active = False
                 
+                # Отправляем уведомление в общий чат
                 result_embed = discord.Embed(
                     title="🗳️ Результаты голосования",
                     description=f"**{exile_player.name}** исключен из бункера! (Число голосов: {max_votes})",
@@ -654,6 +691,32 @@ class PlayerVoteSelect(discord.ui.Select):
                 )
                 
                 await channel.send(embed=result_embed)
+                
+                # Отправляем результаты всем игрокам в ЛС
+                for player in self.game.players:
+                    try:
+                        user = bot.get_user(player.id)
+                        if user:
+                            dm_channel = await user.create_dm()
+                            if player.id == exile_id:
+                                # Специальное сообщение для исключенного игрока
+                                player_result_embed = discord.Embed(
+                                    title="🚫 Вы исключены из бункера",
+                                    description=f"По результатам голосования вы были исключены из бункера.\n"
+                                              f"Число голосов против вас: {max_votes}",
+                                    color=discord.Color.red()
+                                )
+                            else:
+                                # Сообщение для остальных игроков
+                                player_result_embed = discord.Embed(
+                                    title="🗳️ Результаты голосования",
+                                    description=f"**{exile_player.name}** исключен из бункера.\n"
+                                              f"Число голосов: {max_votes}",
+                                    color=discord.Color.red()
+                                )
+                            await dm_channel.send(embed=player_result_embed)
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке результатов игроку {player.name}: {e}", exc_info=True)
                 
                 # Обновляем таблицы статусов
                 await self.game.update_all_player_tables(bot)
@@ -668,6 +731,20 @@ class PlayerVoteSelect(discord.ui.Select):
                         color=discord.Color.gold()
                     )
                     await channel.send(embed=winner_embed)
+                    
+                    # Отправляем уведомление о победе победителю в ЛС
+                    try:
+                        winner_user = bot.get_user(winner.id)
+                        if winner_user:
+                            dm_channel = await winner_user.create_dm()
+                            winner_dm_embed = discord.Embed(
+                                title="🏆 Поздравляем с победой!",
+                                description="Вы стали единственным выжившим в бункере!",
+                                color=discord.Color.gold()
+                            )
+                            await dm_channel.send(embed=winner_dm_embed)
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке уведомления победителю: {e}", exc_info=True)
                     
                     # Завершаем игру
                     self.game.status = "finished"
@@ -839,6 +916,9 @@ class PlayerActionView(discord.ui.View):
         self.game = game
         self.player = player
         
+        # Добавление кнопки "Открыть всё"
+        self.add_item(RevealAllButton(self.game, self.player))
+        
         # Добавление кнопок для раскрытия характеристик
         characteristics = [
             ("Пол", "gender"),
@@ -861,6 +941,80 @@ class PlayerActionView(discord.ui.View):
         
         # Кнопка для генерации изображения персонажа
         self.add_item(GenerateImageButton(self.game, self.player))
+
+# Кнопка для раскрытия всех характеристик
+class RevealAllButton(discord.ui.Button):
+    """Кнопка для раскрытия всех характеристик игрока"""
+    
+    def __init__(self, game: BunkerGame, player: Player):
+        """
+        Инициализация кнопки
+        
+        Args:
+            game: Объект игры
+            player: Объект игрока
+        """
+        super().__init__(
+            label="⚠️ Открыть всё", 
+            style=discord.ButtonStyle.danger, 
+            custom_id="reveal_all",
+            row=4
+        )
+        self.game = game
+        self.player = player
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Обработчик нажатия на кнопку раскрытия всех характеристик"""
+        try:
+            # Отложенный ответ
+            await interaction.response.defer(ephemeral=True)
+            
+            # Получение игры и игрока из контекста
+            game = None
+            player = None
+            
+            for g in active_games.values():
+                for p in g.players:
+                    if p.id == interaction.user.id:
+                        game = g
+                        player = p
+                        break
+                if game:
+                    break
+            
+            if not game or not player:
+                await interaction.followup.send("Ошибка: игра не найдена", ephemeral=True)
+                return
+            
+            # Раскрытие всех характеристик
+            revealed_count = 0
+            attributes = ["gender", "body", "trait", "profession", "health", 
+                         "hobby", "phobia", "inventory", "backpack", "additional"]
+            
+            for attr in attributes:
+                if player.reveal_attribute(attr):
+                    revealed_count += 1
+            
+            if revealed_count > 0:
+                # Обновление у всех игроков
+                await game.update_all_player_tables(bot)
+                
+                # Уведомление в канале
+                channel = bot.get_channel(game.channel_id)
+                await channel.send(f"**{player.name}** раскрыл все свои характеристики!")
+                
+                # Деактивация всех кнопок раскрытия
+                for item in self.view.children:
+                    if isinstance(item, (RevealButton, RevealAllButton)):
+                        item.disabled = True
+                await interaction.message.edit(view=self.view)
+                
+                logger.info(f"Игрок {player.name} раскрыл все характеристики")
+            else:
+                await interaction.followup.send("Все характеристики уже раскрыты!", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Ошибка при раскрытии всех характеристик: {e}", exc_info=True)
+            await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
 
 # Кнопка для использования специальной способности
 class SpecialAbilityButton(discord.ui.Button):
@@ -971,8 +1125,6 @@ class RevealButton(discord.ui.Button):
                 channel = bot.get_channel(game.channel_id)
                 attribute_name = self.label.replace('Открыть ', '')
                 await channel.send(f"**{player.name}** раскрыл характеристику: **{attribute_name}**")
-                
-                # await interaction.followup.send(f"Вы раскрыли характеристику: {attribute_name}", ephemeral=True)
                 
                 # Деактивация кнопки
                 self.disabled = True
