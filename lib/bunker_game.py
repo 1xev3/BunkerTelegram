@@ -97,9 +97,18 @@ class Player:
         self.inventory = random.choice(GameData.INVENTORY)
         
         # Генерация от 1 до 3 предметов для рюкзака
-        backpack_items_count = random.randint(1, 3)
+        backpack_items_count = random.randint(1, GameData.BACKPACK_ITEMS_COUNT_MAX)
         backpack_items = random.sample(GameData.BACKPACK_ITEMS, k=backpack_items_count)
-        self.backpack = ", ".join(backpack_items)
+        backpack_items_values = []
+        for item in backpack_items:
+            if isinstance(item, tuple):
+                item_name, item_min, item_max = item
+                item_count = random.randint(item_min, item_max)
+                item_name = f"{item_name} ({item_count} шт)"
+                backpack_items_values.append(item_name)
+            else:
+                backpack_items_values.append(item)
+        self.backpack = ", ".join(backpack_items_values)
         
         self.additional = random.choice(GameData.ADDITIONAL_INFO)
 
@@ -200,7 +209,7 @@ class Bunker:
         self.duration = random.choice(GameData.BUNKER_DURATIONS)
         self.food = random.choice(GameData.FOOD_SUPPLIES)
         # Выбираем от 2 до 5 случайных предметов
-        self.items = random.sample(GameData.BUNKER_ITEMS, k=random.randint(1, 5))
+        self.items = random.sample(GameData.BUNKER_ITEMS, k=random.randint(1, GameData.BUNKER_ITEMS_COUNT_MAX))
 
         self.disaster_info = await self.ai_client.generate_message([
             {"role": "system", "content": "You are a helpful assistant that generates bunker disaster descriptions for a bunker game. Always respond in User language."},
