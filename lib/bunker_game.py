@@ -7,6 +7,13 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 from io import BytesIO
 
+from lib.ai_client import G4FClient
+
+def weighed_random(tbl: List[Tuple[Any, float]]) -> Any:
+    items = [x[0] for x in tbl]  # Элементы
+    weights = [x[1] for x in tbl]  # Веса
+    return random.choices(items, weights=weights, k=1)[0]
+
 # Вынесем данные в отдельные константы в верхней части файла
 class GameData:
     """Класс для хранения данных игры"""
@@ -26,7 +33,10 @@ class GameData:
     TRAITS = [
         "Трудолюбивый", "Ленивый", "Общительный", "Замкнутый", "Умный", "Глупый", 
         "Творческий", "Практичный", "Храбрый", "Трусливый", "Честный", "Лживый",
-        "Оптимист", "Пессимист", "Щедрый", "Жадный", "Терпеливый", "Вспыльчивый"
+        "Оптимист", "Пессимист", "Щедрый", "Жадный", "Терпеливый", "Вспыльчивый",
+        "Добрый", "Злой", "Внимательный", "Рассеянный", "Аккуратный", "Неряшливый",
+        "Целеустремленный", "Безвольный", "Спокойный", "Нервный", "Веселый", "Угрюмый",
+        "Любопытный", "Равнодушный", "Ответственный", "Безответственный", "Дружелюбный", "Агрессивный"
     ]
     
     PROFESSIONS = [
@@ -36,14 +46,27 @@ class GameData:
     ]
     
     HEALTH_STATES = [
-        ("Здоров", 0.4),  # 40% шанс
-        ("Диабет", 0.1),           # 10% шанс
-        ("Астма", 0.1),            # 10% шанс
-        ("Аллергия", 0.1),         # 10% шанс
-        ("Болезнь сердца", 0.1),   # 10% шанс
-        ("Проблемы со зрением", 0.1),  # 10% шанс
-        ("Неизвестная болезнь", 0.1),  # 5% шанс
-        ("Анемия", 0.1)           # 5% шанс
+        ("Здоров", 0.3),  # 30% шанс
+        ("Диабет", 0.05),  
+        ("Астма", 0.05),         
+        ("Аллергия", 0.05),      
+        ("Болезнь сердца", 0.05),
+        ("Проблемы со зрением", 0.05),
+        ("Неизвестная болезнь", 0.05),
+        ("Анемия", 0.05),
+        ("Артрит", 0.05),
+        ("Мигрень", 0.05),
+        ("Депрессия", 0.05),
+        ("Гипертония", 0.05),
+        ("Язва желудка", 0.05),
+        ("Бессонница", 0.05),
+        ("Эпилепсия", 0.05)
+    ]
+
+    HEALTH_STAGES = [
+        ("Лёгкое", 0.5),
+        ("Среднее", 0.3),
+        ("Тяжёлое", 0.2)
     ]
     
     HOBBIES = [
@@ -60,22 +83,64 @@ class GameData:
     ]
     
     INVENTORY = [
-        "Аптечка", "Набор инструментов", "Рация", "Оружие", "Карта местности", 
-        "Спальный мешок", "Палатка", "Компас", "Огнетушитель", "Веревка",
-        "Солнечная батарея", "Фильтр для воды", "Газовая горелка", "Бинокль", "Фонарик"
+        "Аптечка", "Набор инструментов", "AK-47", "Карта местности",
+        "Спальный мешок", "Палатка", "Компас", "Огнетушитель", 
+        "Солнечная батарея", "Фильтр для воды", "Газовая горелка", "Бинокль",
+        "Дизельный генератор", "Запас топлива", "Сварочный аппарат", "Токарный станок",
+        "Мотоцикл", "Квадрокоптер", "Спутниковый телефон", "Радиостанция",
+        "Промышленный холодильник", "Система гидропоники", "Инкубатор для яиц",
+        "Промышленная стиральная машина", "Дистиллятор воды", "Ветрогенератор",
+        "Промышленная печь", "Медицинское оборудование", "Микроскоп", "Телескоп",
+        "Сейф", "Верстак с инструментами", "Швейная машинка", "3D-принтер",
+        "Лодка", "Снегоход", "Переносная теплица", "Мини-трактор",
+        "Токарный станок", "Фрезерный станок", "Сушильный шкаф"
     ]
     
     BACKPACK_ITEMS = [
-        "Нож", "Спички", "Фляга с водой", "Консервы", "Батарейки", 
+        "Нож", "Спички", "Фляга с водой", "Консервы", "Батарейки",
         "Свечи", "Блокнот и ручка", "Антисептик", "Зажигалка", "Рыболовные снасти",
-        "Сухой паек", "Радиоприемник", "Часы", "Кофе", "Чай", "Шоколад"
+        "Сухой паек", "Радиоприемник", "Часы", "Кофе", "Чай", "Шоколад", "Веревка",
+        "Фонарик", "Компас", "Карта", "Аптечка первой помощи", "Мультитул",
+        "Спальный мешок", "Термос", "Солнцезащитные очки", "Репеллент от насекомых",
+        "Зубная щетка и паста", "Мыло", "Полотенце", "Теплая одежда", "Дождевик",
+        "Перчатки", "Бинокль", "Сигнальная ракета", "Таблетки для очистки воды",
+        "Швейный набор", "Скотч", "Зарядное устройство", "Портативный аккумулятор",
+        "Спутниковый телефон", "Солнечная зарядка", "Рация", "Топор", "Лопата",
+        "Котелок", "Фильтр для воды", "Спички в водонепроницаемой упаковке",
+        "Сухое горючее", "Марля", "Бинты", "Антибиотики", "Обезболивающее",
+        "Противоаллергенные препараты", "Активированный уголь", "Витамины"
     ]
     
     ADDITIONAL_INFO = [
-        "Имеет военную подготовку", "Владеет несколькими языками", "Занимался выживанием", 
-        "Умеет оказывать первую помощь", "Страдает бессонницей", "Вегетарианец",
-        "Имеет опыт выживания в дикой природе", "Имеет навыки самообороны", 
-        "Боится замкнутых пространств", "Имеет проблемы с алкоголем"
+        # Навыки выживания
+        "Умеет разводить огонь без спичек", "Знает съедобные растения", "Умеет ставить ловушки",
+        "Имеет опыт выживания в дикой природе", "Умеет очищать воду", "Знает основы первой помощи",
+        
+        # Практические навыки
+        "Умеет шить одежду", "Хорошо готовит", "Умеет консервировать продукты",
+        "Разбирается в электрике", "Умеет ремонтировать технику", "Знает основы строительства",
+        "Умеет варить мыло", "Умеет делать свечи", "Умеет выращивать растения",
+        
+        # Интеллектуальные навыки
+        "Знает несколько иностранных языков", "Разбирается в медицине", "Имеет фотографическую память",
+        "Эксперт по криптографии", "Знает высшую математику", "Разбирается в химии",
+        
+        # Социальные навыки
+        "Хороший лидер", "Умеет разрешать конфликты", "Отличный рассказчик",
+        "Умеет поднять боевой дух", "Хорошо работает в команде", "Умеет вести переговоры",
+        
+        # Творческие навыки
+        "Умеет играть на нескольких музыкальных инструментах", "Талантливый художник",
+        "Пишет стихи и песни", "Умеет танцевать", "Хороший актер", "Умеет делать скульптуры",
+        
+        # Необычные навыки
+        "Умеет читать по губам", "Владеет языком жестов", "Разбирается в астрономии",
+        "Умеет предсказывать погоду", "Хорошо ориентируется по звездам", "Умеет гипнотизировать",
+        
+        # Полезные знания
+        "Знает все о грибах и ягодах", "Разбирается в лекарственных травах",
+        "Умеет делать самогон", "Знает как делать порох", "Умеет обращаться с любым оружием",
+        "Эксперт по системам безопасности"
     ]
     
     SPECIAL_ABILITIES = [
@@ -86,21 +151,37 @@ class GameData:
         "Может скрыть одну свою раскрытую характеристику",
         "Может украсть одну вещь из инвентаря другого игрока",
         "Может поменяться одной характеристикой с другим игроком",
-        "Может увидеть результаты голосования до его окончания"
     ]
     
     # Данные для генерации бункера
     BUNKER_SIZES = ["Маленький (30 кв.м)", "Средний (60 кв.м)", "Большой (100 кв.м)", "Огромный (150 кв.м)"]
-    BUNKER_DURATIONS = ["1 месяц", "3 месяца", "6 месяцев", "1 год", "5 лет"]
+    BUNKER_DURATIONS = ["6 месяцев", "1 год", "2 года", "3 года", "5 лет", "10 лет"]
     FOOD_SUPPLIES = [
-        "Еды нет", "Очень мало еды (на неделю)", "Мало еды (на месяц)", 
-        "Достаточно еды (на полгода)", "Много еды (на год)", "Очень много еды (на несколько лет)"
+        "Еды нет", "Очень мало еды (на месяц)", "Мало еды (на полгода)", 
+        "Достаточно еды (на 2 года)", "Много еды (на 4 года)"
     ]
     BUNKER_ITEMS = [
-        "Медицинское оборудование", "Система фильтрации воды", "Система очистки воздуха", 
+        # Полезные предметы
+        "Медицинское оборудование", "Система фильтрации воды", "Система очистки воздуха",
         "Генератор электричества", "Оружейная комната", "Библиотека", "Лаборатория",
         "Теплица для выращивания растений", "Радиооборудование", "Компьютерное оборудование",
-        "Запас медикаментов", "Мастерская", "Инструменты для ремонта", "Запчасти для техники"
+        "Запас медикаментов", "Мастерская", "Инструменты для ремонта", "Запчасти для техники",
+        
+        # Развлечения и досуг
+        "Коллекция настольных игр", "Музыкальные инструменты", "Спортивный инвентарь",
+        "Художественные принадлежности", "Домашний кинотеатр", "Караоке-система",
+        
+        # Сомнительная польза
+        "Коллекция редких марок", "Чучело медведя", "Статуя Давида в полный рост",
+        "Аквариум с экзотическими рыбками", "Коллекция бабочек", "Старый пинбольный автомат",
+        
+        # Потенциально опасные
+        "Экспериментальные химикаты", "Нестабильный реактор", "Контейнер с неизвестным вирусом",
+        "Взрывоопасные материалы", "Радиоактивные элементы", "Ядовитые растения в горшках",
+        
+        # Странные и бесполезные
+        "Чемодан с париками", "Коллекция резиновых уточек", "Сломанный факс",
+        "Стопка журналов 1980-х годов", "Чучело единорога", "Машина для производства мыльных пузырей"
     ]
 
 
@@ -150,32 +231,33 @@ class Player:
         # Активен ли игрок (не выбыл из игры)
         self.is_active = True
     
-    def generate_character(self) -> None:
+    async def generate_character(self, ai_client: G4FClient) -> None:
         """Генерация случайных характеристик персонажа"""
         self.gender = random.choice(GameData.GENDERS)
-        self.body_type = random.choice(GameData.BODY_TYPES)
+
+        # Генерация телосложения
+        body_type = random.choice(GameData.BODY_TYPES)
+        body_height = int(np.random.normal(180, 15))  # Mean=180, std=15 gives most heights between 150-210
+        body_height = max(150, min(210, body_height))  # Clamp between 150-210 cm
+        self.body_type = f"{body_type} ({body_height} см)"
         self.trait = random.choice(GameData.TRAITS)
         
         # Генерация профессии с уровнем
         profession = random.choice(GameData.PROFESSIONS)
-        profession_level = random.choices(
-            [level[0] for level in GameData.SKILL_LEVELS],
-            weights=[level[1] for level in GameData.SKILL_LEVELS]
-        )[0]
+        profession_level = weighed_random(GameData.SKILL_LEVELS)
         self.profession = f"{profession} ({profession_level})"
         
         # Генерация здоровья
-        self.health = random.choices(
-            [state[0] for state in GameData.HEALTH_STATES],
-            weights=[state[1] for state in GameData.HEALTH_STATES]
-        )[0]
+        health = weighed_random(GameData.HEALTH_STATES)
+        health_stage = weighed_random(GameData.HEALTH_STAGES)
+        if health != "Здоров":
+            self.health = f"{health} ({health_stage})"
+        else:
+            self.health = health
         
         # Генерация хобби с уровнем
         hobby = random.choice(GameData.HOBBIES)
-        hobby_level = random.choices(
-            [level[0] for level in GameData.SKILL_LEVELS],
-            weights=[level[1] for level in GameData.SKILL_LEVELS]
-        )[0]
+        hobby_level = weighed_random(GameData.SKILL_LEVELS)
         self.hobby = f"{hobby} ({hobby_level})"
         
         self.phobia = random.choice(GameData.PHOBIAS)
@@ -183,6 +265,12 @@ class Player:
         self.backpack = random.choice(GameData.BACKPACK_ITEMS)
         self.additional = random.choice(GameData.ADDITIONAL_INFO)
         self.special_ability = random.choice(GameData.SPECIAL_ABILITIES)
+
+        self.description = ""
+        self.description = await ai_client.generate_message([
+            {"role": "system", "content": "You are a helpful assistant that generates character descriptions for a bunker game. Always respond in User language."},
+            {"role": "user", "content": f"Сгенерируй краткую биографию для персонажа. В ответе оставь только само описание, не пиши ничего от своего имени. В биографию так-же включи: Имя, цвет глаз, цвет волос, цвет кожи. Сгенерируй биографию от лица персонажа. Сгенерируй всё одним предложением. Вот досье персонажа: {self.get_character_card()}"}
+        ])
     
     def get_character_card(self) -> str:
         """
@@ -192,6 +280,7 @@ class Player:
             str: Форматированное описание персонажа
         """
         return (
+            f"Вы: {self.description}\n"
             f"**Пол**: {self.gender}\n"
             f"**Телосложение**: {self.body_type}\n"
             f"**Человеческая черта**: {self.trait}\n"
@@ -250,8 +339,9 @@ class Player:
 class Bunker:
     """Класс, представляющий бункер в игре"""
     
-    def __init__(self):
+    def __init__(self, ai_client: G4FClient):
         """Инициализация бункера"""
+        self.ai_client = ai_client
         self.size = ""
         self.duration = ""
         self.food = ""
@@ -263,9 +353,9 @@ class Bunker:
         self.duration = random.choice(GameData.BUNKER_DURATIONS)
         self.food = random.choice(GameData.FOOD_SUPPLIES)
         # Выбираем от 2 до 5 случайных предметов
-        self.items = random.sample(GameData.BUNKER_ITEMS, k=random.randint(2, 5))
+        self.items = random.sample(GameData.BUNKER_ITEMS, k=random.randint(1, 5))
     
-    def get_description(self) -> str:
+    async def get_description(self) -> str:
         """
         Получение форматированного описания бункера
         
@@ -273,11 +363,15 @@ class Bunker:
             str: Форматированное описание бункера
         """
         items_str = ", ".join(self.items)
+
+        bunker_disaster = await self.ai_client.generate_message([
+            {"role": "system", "content": "You are a helpful assistant that generates bunker disaster descriptions for a bunker game. Always respond in User language."},
+            {"role": "user", "content": f"Сгенерируй случайный смертельный катаклизм для игры в бункер (Например вирус, наводнение, захват пришельцами и тд (придумай)). Катаклизм - это то что происходит за пределами бункера! В зависимости от этого игроки будут выбирать кто заслуживает место в бункере. В ответе оставь только само описание, не пиши ничего от своего имени. В ответе укажи название катаклизма, его описание и последствия."}
+        ])
         
         return (
             "**Описание найденного бункера**\n\n"
-            "Единственный шанс, чтобы выжить в случае катаклизма - это попасть в бункер. "
-            "У вас есть информация о времени его постройки, местонахождении и данные о спальных комнатах.\n\n"
+            f"{bunker_disaster}\n\n"
             f"**Размер бункера**: {self.size}\n"
             f"**Время нахождения**: {self.duration}\n"
             f"**Количество еды**: {self.food}\n"
@@ -372,7 +466,7 @@ class ImageGenerator:
             
             # Определяем колонки и их базовые ширины
             columns = ["Игрок", "Пол", "Тело", "Черта", "Проф.", "Здоровье", "Хобби", "Фобия", "Инв.", "Рюкзак", "Доп."]
-            column_widths = [150, 80, 80, 80, 80, 80, 80, 80, 80, 80, 80]
+            column_widths = [150, 80, 100, 100, 100, 100, 100, 100, 100, 100, 100]
             
             # Рассчитываем размеры изображения
             padding = 10
@@ -505,7 +599,7 @@ class ImageGenerator:
 class BunkerGame:
     """Класс, управляющий игровой логикой"""
     
-    def __init__(self, admin_id: int, channel_id: int):
+    def __init__(self, ai_client: G4FClient, admin_id: int, channel_id: int):
         """
         Инициализация игры
         
@@ -513,6 +607,8 @@ class BunkerGame:
             admin_id: ID администратора игры
             channel_id: ID канала, в котором проходит игра
         """
+        self.ai_client = ai_client
+
         self.admin_id = admin_id
         self.channel_id = channel_id
         self.message_id = None
@@ -520,10 +616,11 @@ class BunkerGame:
         self.vote_message_id = None
         self.status = "waiting"  # waiting, running, finished
         self.players: List[Player] = []
-        self.bunker = Bunker()
+        self.bunker = Bunker(self.ai_client)
         self.current_round = 0
-        self.votes: Dict[int, str] = {}  # {player_id: vote}
-        self.voted_players: List[int] = []  # Список ID проголосовавших игроков
+        self.votes = {}  # {voter_id: voted_for_id}
+        self.voted_players = set()  # Множество ID проголосовавших игроков
+        self.active_voting_players = 0  # Счетчик активных игроков для голосования
     
     def add_player(self, player: Player) -> None:
         """
@@ -554,10 +651,10 @@ class BunkerGame:
         """Генерация бункера"""
         self.bunker.generate()
     
-    def generate_player_cards(self) -> None:
+    async def generate_player_cards(self) -> None:
         """Генерация карточек для всех игроков"""
         for player in self.players:
-            player.generate_character()
+            await player.generate_character(self.ai_client)
     
     def generate_status_image(self) -> discord.File:
         """
@@ -576,8 +673,7 @@ class BunkerGame:
             bot: Объект бота Discord
         """
         try:
-            status_image = self.generate_status_image()
-            
+            # Генерируем изображение для каждого игрока отдельно
             for player in self.players:
                 if not player.is_active:
                     continue
@@ -587,6 +683,9 @@ class BunkerGame:
                     continue
                 
                 try:
+                    # Создаем новое изображение для каждого игрока
+                    status_image = self.generate_status_image()
+                    
                     dm_channel = await user.create_dm()
                     
                     if player.status_message_id:
@@ -640,15 +739,15 @@ class BunkerGame:
     def reset_votes(self) -> None:
         """Сброс голосов"""
         self.votes = {}
-        self.voted_players = []
+        self.voted_players = set()
     
-    def add_vote(self, voter_id: int, vote: str) -> bool:
+    def add_vote(self, voter_id: int, target_id: int) -> bool:
         """
         Добавление голоса
         
         Args:
             voter_id: ID голосующего игрока
-            vote: Значение голоса
+            target_id: ID игрока, за которого голосуют
             
         Returns:
             bool: True, если голос успешно учтен, False, если игрок уже голосовал
@@ -656,18 +755,18 @@ class BunkerGame:
         if voter_id in self.voted_players:
             return False
         
-        self.votes[voter_id] = vote
-        self.voted_players.append(voter_id)
+        self.votes[voter_id] = target_id
+        self.voted_players.add(voter_id)
         return True
     
-    def count_votes(self) -> Dict[str, int]:
+    def count_votes(self) -> Dict[int, int]:
         """
         Подсчет голосов
         
         Returns:
-            Dict[str, int]: Словарь {значение голоса: количество}
+            Dict[int, int]: Словарь {ID игрока: количество голосов}
         """
         results = {}
-        for vote in self.votes.values():
-            results[vote] = results.get(vote, 0) + 1
+        for target_id in self.votes.values():
+            results[target_id] = results.get(target_id, 0) + 1
         return results 

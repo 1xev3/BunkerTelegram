@@ -7,8 +7,9 @@ import logging
 from typing import Dict, List, Optional, Union, Callable, Any
 from dotenv import load_dotenv
 from discord import app_commands
-from bunker_game import BunkerGame, Player, Bunker, ImageGenerator
-from logging_config import setup_logging
+from lib.ai_client import G4FClient
+from lib.bunker_game import BunkerGame, Player, Bunker, ImageGenerator
+from lib.logging_config import setup_logging
 
 # Настройка логирования
 logger = setup_logging()
@@ -22,6 +23,14 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.reactions = True
+
+
+ai_client = G4FClient(
+    model="gemini-2.0-flash", 
+    provider="Dynaspark",
+    image_model="sdxl-turbo",
+    image_provider="ARTA"
+)
 
 # Инициализация бота
 bot = commands.Bot(command_prefix='/', intents=intents)
@@ -71,7 +80,7 @@ async def start_game(interaction: discord.Interaction):
         return
     
     # Создание новой игры
-    game = BunkerGame(interaction.user.id, channel.id)
+    game = BunkerGame(ai_client, interaction.user.id, channel.id)
     active_games[channel.id] = game
     
     # Создание эмбеда для приглашения игроков
@@ -214,7 +223,7 @@ class AdminControlView(discord.ui.View):
             
             # Генерация бункера и персонажей
             self.game.generate_bunker()
-            self.game.generate_player_cards()
+            await self.game.generate_player_cards()
             
             # Уведомление в канале
             channel = bot.get_channel(self.game.channel_id)
@@ -257,7 +266,7 @@ class AdminControlView(discord.ui.View):
             logger.error(f"Ошибка при переходе к следующему раунду: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
     
-    @discord.ui.button(label="Изгнать участника", style=discord.ButtonStyle.danger, custom_id="exile_player", row=1)
+    @discord.ui.button(label="Начать голосование", style=discord.ButtonStyle.danger, custom_id="exile_player", row=1)
     async def exile_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Обработчик нажатия кнопки изгнания участника"""
         try:
@@ -271,26 +280,71 @@ class AdminControlView(discord.ui.View):
             
             # Проверка, есть ли активные игроки
             active_players = self.game.get_active_players()
-            if len(active_players) <= 2:
+            if len(active_players) <= 1:
                 await interaction.followup.send("Осталось слишком мало игроков для голосования!", ephemeral=True)
                 return
             
-            # Создание меню для выбора игрока
+            # Начинаем голосование
+            channel = bot.get_channel(self.game.channel_id)
+            
+            # Создаем эмбед для уведомления в канале
+            embed = discord.Embed(
+                title="🗳️ Голосование за исключение из бункера",
+                description="Администратор начал голосование. Проверьте личные сообщения для участия в голосовании.",
+                color=discord.Color.orange()
+            )
+            
+            # Сбрасываем голоса перед новым голосованием
+            self.game.reset_votes()
+            
+            # Отправляем голосование каждому игроку в ЛС
             options = [
                 discord.SelectOption(
                     label=player.name,
                     value=str(player.id),
-                    description=f"Игрок {player.name}"
+                    description=f"Изгнать игрока {player.name}"
                 ) for player in active_players
             ]
             
-            # Отправка меню выбора
-            view = ExileSelectView(self.game)
-            view.add_item(ExileSelect(options, self.game))
+            # Сохраняем количество активных игроков для автоматического завершения
+            self.game.active_voting_players = len(active_players)
             
-            await interaction.followup.send("Выберите игрока для изгнания:", view=view, ephemeral=True)
+            # Отправляем сообщение в канал
+            vote_message = await channel.send(embed=embed)
+            
+            # Сохраняем ID сообщения с голосованием
+            self.game.vote_message_id = vote_message.id
+            
+            # Отправляем селект-меню каждому игроку
+            for player in active_players:
+                user = bot.get_user(player.id)
+                if user:
+                    try:
+                        dm_channel = await user.create_dm()
+                        
+                        # Создаем представление и добавляем в него селект-меню
+                        view = discord.ui.View(timeout=None)
+                        vote_select = PlayerVoteSelect(options, self.game, self.game.channel_id)
+                        view.add_item(vote_select)
+                        
+                        # Создаем эмбед для голосования в ЛС
+                        dm_embed = discord.Embed(
+                            title="🗳️ Голосование за исключение из бункера",
+                            description="Выберите, кого вы хотите исключить из бункера:",
+                            color=discord.Color.orange()
+                        )
+                        
+                        await dm_channel.send(embed=dm_embed, view=view)
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке голосования игроку {player.name}: {e}", exc_info=True)
+            
+            # Отправляем кнопку завершения голосования администратору (на случай, если что-то пойдет не так)
+            admin_vote_view = AdminVoteControlView(self.game)
+            await interaction.followup.send("Вы начали голосование за исключение игрока. Голосование автоматически завершится, когда все проголосуют. Но вы также можете завершить его вручную кнопкой ниже:", view=admin_vote_view, ephemeral=True)
+            
+            logger.info(f"Начато голосование за исключение игрока в канале {self.game.channel_id}")
         except Exception as e:
-            logger.error(f"Ошибка при выборе игрока для изгнания: {e}", exc_info=True)
+            logger.error(f"Ошибка при начале голосования: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
     
     @discord.ui.button(label="Закончить игру", style=discord.ButtonStyle.secondary, custom_id="end_game", row=1)
@@ -343,24 +397,21 @@ class AdminControlView(discord.ui.View):
             interaction: Объект взаимодействия Discord
         """
         try:
-            # Обновляем кнопки
-            self.clear_items()
-            self.add_item(discord.ui.Button(label="Следующий раунд", style=discord.ButtonStyle.primary, custom_id="next_round"))
-            self.add_item(discord.ui.Button(label="Изгнать участника", style=discord.ButtonStyle.danger, custom_id="exile_player"))
-            self.add_item(discord.ui.Button(label="Закончить игру", style=discord.ButtonStyle.secondary, custom_id="end_game"))
+            # Создаем новое представление с теми же настройками
+            new_view = AdminControlView(self.game)
             
             # Получаем канал и сообщение заново, так как взаимодействие уже отложено
             dm_channel = await interaction.user.create_dm()
             try:
                 message = await dm_channel.fetch_message(self.game.admin_message_id)
-                await message.edit(view=self)
+                await message.edit(view=new_view)
             except discord.NotFound:
                 # Если сообщение не найдено, отправляем новое
                 message = await dm_channel.send(embed=discord.Embed(
                     title="Управление игрой Бункер",
                     description="Используйте кнопки ниже для управления игрой",
                     color=discord.Color.blue()
-                ), view=self)
+                ), view=new_view)
                 self.game.admin_message_id = message.id
         except Exception as e:
             logger.error(f"Ошибка при обновлении контроллов администратора: {e}", exc_info=True)
@@ -374,7 +425,7 @@ class AdminControlView(discord.ui.View):
                     # Информация о бункере
                     bunker_embed = discord.Embed(
                         title="🏢 Информация о бункере",
-                        description=self.game.bunker.get_description(),
+                        description=await self.game.bunker.get_description(),
                         color=discord.Color.gold()
                     )
                     
@@ -419,15 +470,12 @@ class AdminControlView(discord.ui.View):
                     file=status_image
                 )
                 player.status_message_id = message.id
-                # Удаляем временный файл
-                if os.path.exists(status_image.filename):
-                    os.remove(status_image.filename)
         except Exception as e:
             logger.error(f"Ошибка при отправке таблицы статусов: {e}", exc_info=True)
 
-# Класс для выбора игрока для изгнания
-class ExileSelectView(discord.ui.View):
-    """Класс представления с выбором игрока для изгнания"""
+# Класс для выбора игрока для голосования всеми участниками
+class VotingView(discord.ui.View):
+    """Класс представления для голосования всеми игроками"""
     
     def __init__(self, game: BunkerGame):
         """
@@ -439,197 +487,328 @@ class ExileSelectView(discord.ui.View):
         super().__init__(timeout=None)
         self.game = game
 
-# Селект-меню для выбора игрока для изгнания
-class ExileSelect(discord.ui.Select):
-    """Селект-меню для выбора игрока для изгнания"""
+# Селект-меню для голосования
+class PlayerVoteSelect(discord.ui.Select):
+    """Селект-меню для голосования игроками"""
     
-    def __init__(self, options: List[discord.SelectOption], game: BunkerGame):
+    def __init__(self, options: List[discord.SelectOption], game: BunkerGame, channel_id: int):
         """
         Инициализация селект-меню
         
         Args:
             options: Список опций для выбора
             game: Объект игры
+            channel_id: ID канала, где происходит игра
         """
         super().__init__(
-            placeholder="Выберите игрока для голосования на изгнание...",
+            placeholder="Выберите игрока для исключения...",
             min_values=1,
             max_values=1,
             options=options
         )
         self.game = game
+        self.channel_id = channel_id
     
     async def callback(self, interaction: discord.Interaction):
-        """Обработчик выбора игрока для изгнания"""
+        """Обработчик выбора игрока для голосования"""
+        try:
+            # Проверяем, участвует ли пользователь в игре
+            is_player = any(player.id == interaction.user.id and player.is_active for player in self.game.players)
+            if not is_player:
+                await interaction.response.send_message("Вы не являетесь активным участником этой игры!", ephemeral=True)
+                return
+            
+            # Проверяем, не голосовал ли пользователь уже
+            if interaction.user.id in self.game.voted_players:
+                await interaction.response.send_message("Вы уже проголосовали!", ephemeral=True)
+                return
+            
+            # Выбранный игрок
+            target_id = int(self.values[0])
+            
+            # Добавляем голос
+            self.game.add_vote(interaction.user.id, target_id)
+            
+            # Деактивируем селект-меню после голосования
+            self.disabled = True
+            await interaction.response.edit_message(view=self.view)
+            
+            await interaction.followup.send("Вы проголосовали за исключение игрока. Когда все проголосуют, результаты будут объявлены в общем канале.")
+            logger.info(f"Игрок {interaction.user.name} проголосовал за исключение игрока с ID {target_id}")
+            
+            # Проверяем, все ли проголосовали, и если да, автоматически завершаем голосование
+            if len(self.game.voted_players) >= self.game.active_voting_players:
+                # Дополнительная защита от повторного завершения голосования
+                if self.game.votes and self.game.active_voting_players > 0:
+                    logger.info(f"Автоматическое завершение голосования - проголосовали все игроки ({len(self.game.voted_players)} из {self.game.active_voting_players})")
+                    # Запускаем завершение голосования через фоновую задачу, чтобы не блокировать текущий запрос
+                    bot.loop.create_task(self.finish_voting())
+                    # Сбрасываем счетчик, чтобы завершение не вызывалось повторно
+                    self.game.active_voting_players = 0
+        except Exception as e:
+            logger.error(f"Ошибка при голосовании: {e}", exc_info=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"Произошла ошибка: {e}", ephemeral=True)
+    
+    async def finish_voting(self):
+        """Завершение голосования и подведение итогов"""
+        try:
+            # Получаем результаты голосования
+            vote_results = self.game.count_votes()
+            
+            if not vote_results:
+                logger.warning("Никто не проголосовал, но система пытается завершить голосование")
+                return
+            
+            # Находим игрока с наибольшим числом голосов
+            max_votes = 0
+            candidates = []
+            
+            for player_id, votes in vote_results.items():
+                if votes > max_votes:
+                    max_votes = votes
+                    candidates = [player_id]
+                elif votes == max_votes:
+                    candidates.append(player_id)
+            
+            # Получаем канал
+            channel = bot.get_channel(self.channel_id)
+            if not channel:
+                logger.error(f"Канал {self.channel_id} не найден")
+                return
+            
+            # Получаем сообщение с голосованием и обновляем его
+            try:
+                vote_message = await channel.fetch_message(self.game.vote_message_id)
+                vote_ended_embed = discord.Embed(
+                    title="🗳️ Голосование завершено",
+                    description="Все игроки проголосовали. Подсчитываем результаты...",
+                    color=discord.Color.blue()
+                )
+                await vote_message.edit(embed=vote_ended_embed)
+            except discord.NotFound:
+                logger.warning("Сообщение с голосованием не найдено")
+            except Exception as e:
+                logger.error(f"Ошибка при обновлении сообщения голосования: {e}", exc_info=True)
+            
+            # Если есть несколько кандидатов с одинаковым числом голосов
+            if len(candidates) > 1:
+                candidate_names = []
+                for candidate_id in candidates:
+                    for player in self.game.players:
+                        if player.id == candidate_id:
+                            candidate_names.append(player.name)
+                            break
+                
+                result_embed = discord.Embed(
+                    title="🗳️ Результаты голосования",
+                    description=f"У нескольких игроков одинаковое количество голосов ({max_votes}):\n" + 
+                               "\n".join([f"• {name}" for name in candidate_names]),
+                    color=discord.Color.blue()
+                )
+                
+                await channel.send(embed=result_embed)
+                
+                # Уведомляем администратора, что нужно провести новое голосование
+                admin = bot.get_user(self.game.admin_id)
+                if admin:
+                    try:
+                        dm_channel = await admin.create_dm()
+                        await dm_channel.send("Голосование завершилось без однозначного результата. Вы можете начать новое голосование.")
+                    except Exception as e:
+                        logger.error(f"Ошибка при отправке уведомления администратору: {e}", exc_info=True)
+            else:
+                # У нас есть однозначный результат
+                exile_id = candidates[0]
+                exile_player = None
+                
+                for player in self.game.players:
+                    if player.id == exile_id:
+                        exile_player = player
+                        break
+                
+                if not exile_player:
+                    logger.error("Ошибка: игрок не найден")
+                    return
+                
+                # Исключаем игрока
+                exile_player.is_active = False
+                
+                result_embed = discord.Embed(
+                    title="🗳️ Результаты голосования",
+                    description=f"**{exile_player.name}** исключен из бункера! (Число голосов: {max_votes})",
+                    color=discord.Color.red()
+                )
+                
+                await channel.send(embed=result_embed)
+                
+                # Обновляем таблицы статусов
+                await self.game.update_all_player_tables(bot)
+                
+                # Проверяем, остался ли только один игрок
+                active_players = self.game.get_active_players()
+                if len(active_players) == 1:
+                    winner = active_players[0]
+                    winner_embed = discord.Embed(
+                        title="🏆 Игра завершена!",
+                        description=f"**{winner.name}** - единственный выживший в бункере! Поздравляем с победой!",
+                        color=discord.Color.gold()
+                    )
+                    await channel.send(embed=winner_embed)
+                    
+                    # Завершаем игру
+                    self.game.status = "finished"
+                    if self.game.channel_id in active_games:
+                        del active_games[self.game.channel_id]
+                    logger.info(f"Игра завершена победой игрока {winner.name} в канале {self.channel_id}")
+        except Exception as e:
+            logger.error(f"Ошибка при автоматическом завершении голосования: {e}", exc_info=True)
+
+# Класс для кнопок администратора для управления голосованием
+class AdminVoteControlView(discord.ui.View):
+    """Класс представления с кнопками для управления голосованием администратором"""
+    
+    def __init__(self, game: BunkerGame):
+        """
+        Инициализация представления
+        
+        Args:
+            game: Объект игры
+        """
+        super().__init__(timeout=None)
+        self.game = game
+    
+    @discord.ui.button(label="Завершить голосование", style=discord.ButtonStyle.danger)
+    async def end_voting_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Обработчик нажатия кнопки завершения голосования"""
         try:
             # Отложенный ответ
             await interaction.response.defer(ephemeral=True)
             
-            # Получаем выбранного игрока
-            target_player = None
-            for player in self.game.players:
-                if str(player.id) == self.values[0]:
-                    target_player = player
-                    break
-            
-            if not target_player:
-                await interaction.followup.send("Выбранный игрок не найден!", ephemeral=True)
+            # Если голосование уже завершено (счетчик сброшен)
+            if self.game.active_voting_players == 0:
+                await interaction.followup.send("Голосование уже было завершено автоматически!", ephemeral=True)
+                
+                # Деактивируем кнопку завершения голосования
+                self.children[0].disabled = True
+                try:
+                    await interaction.message.edit(view=self)
+                except:
+                    pass
                 return
             
-            # Проверяем, активен ли игрок
-            if not target_player.is_active:
-                await interaction.followup.send("Этот игрок уже исключен из игры!", ephemeral=True)
+            # Получаем результаты голосования
+            vote_results = self.game.count_votes()
+            
+            if not vote_results:
+                await interaction.followup.send("Никто не проголосовал!", ephemeral=True)
                 return
             
-            # Начинаем голосование
+            # Сбрасываем счетчик, чтобы избежать конфликта с автоматическим завершением
+            self.game.active_voting_players = 0
+            
+            # Находим игрока с наибольшим числом голосов
+            max_votes = 0
+            candidates = []
+            
+            for player_id, votes in vote_results.items():
+                if votes > max_votes:
+                    max_votes = votes
+                    candidates = [player_id]
+                elif votes == max_votes:
+                    candidates.append(player_id)
+            
+            # Получаем канал
             channel = bot.get_channel(self.game.channel_id)
             
-            # Создаем эмбед для голосования
-            embed = discord.Embed(
-                title="🗳️ Голосование за исключение из бункера",
-                description=f"Проголосуйте, должен ли **{target_player.name}** быть исключен из бункера.",
-                color=discord.Color.orange()
-            )
+            # Получаем сообщение с голосованием и обновляем его
+            try:
+                vote_message = await channel.fetch_message(self.game.vote_message_id)
+                vote_ended_embed = discord.Embed(
+                    title="🗳️ Голосование завершено",
+                    description="Администратор завершил голосование. Подсчитываем результаты...",
+                    color=discord.Color.blue()
+                )
+                await vote_message.edit(embed=vote_ended_embed)
+            except discord.NotFound:
+                logger.warning("Сообщение с голосованием не найдено")
             
-            # Сбрасываем голоса перед новым голосованием
-            self.game.reset_votes()
-            
-            # Создаем кнопки для голосования
-            vote_view = VoteView(self.game, target_player)
-            
-            vote_message = await channel.send(embed=embed, view=vote_view)
-            
-            # Сохраняем ID сообщения с голосованием
-            self.game.vote_message_id = vote_message.id
-            
-            # Запускаем таймер голосования (60 секунд)
-            await interaction.followup.send(f"Вы начали голосование за исключение игрока {target_player.name}. Голосование продлится 60 секунд.", ephemeral=True)
-            logger.info(f"Начато голосование за исключение игрока {target_player.name} в канале {self.game.channel_id}")
-            
-            # Ждем 60 секунд
-            await asyncio.sleep(60)
-            
-            # Подсчитываем результаты
-            yes_votes = vote_view.yes_votes
-            no_votes = vote_view.no_votes
-            
-            result_embed = discord.Embed(
-                title="🗳️ Результаты голосования",
-                description=f"Голосование за исключение **{target_player.name}** завершено.\n\n"
-                           f"**За исключение**: {yes_votes} голосов\n"
-                           f"**Против исключения**: {no_votes} голосов",
-                color=discord.Color.blue()
-            )
-            
-            # Определяем результат
-            if yes_votes > no_votes:
-                result_embed.description += f"\n\n**{target_player.name}** исключен из бункера!"
+            # Если есть несколько кандидатов с одинаковым числом голосов
+            if len(candidates) > 1:
+                candidate_names = []
+                for candidate_id in candidates:
+                    for player in self.game.players:
+                        if player.id == candidate_id:
+                            candidate_names.append(player.name)
+                            break
+                
+                result_embed = discord.Embed(
+                    title="🗳️ Результаты голосования",
+                    description=f"У нескольких игроков одинаковое количество голосов ({max_votes}):\n" + 
+                               "\n".join([f"• {name}" for name in candidate_names]),
+                    color=discord.Color.blue()
+                )
+                
+                await channel.send(embed=result_embed)
+                await interaction.followup.send("Голосование завершено, но нет однозначного результата. Вы можете начать новое голосование.", ephemeral=True)
+            else:
+                # У нас есть однозначный результат
+                exile_id = candidates[0]
+                exile_player = None
+                
+                for player in self.game.players:
+                    if player.id == exile_id:
+                        exile_player = player
+                        break
+                
+                if not exile_player:
+                    await interaction.followup.send("Ошибка: игрок не найден", ephemeral=True)
+                    return
+                
                 # Исключаем игрока
-                target_player.is_active = False
+                exile_player.is_active = False
+                
+                result_embed = discord.Embed(
+                    title="🗳️ Результаты голосования",
+                    description=f"**{exile_player.name}** исключен из бункера! (Число голосов: {max_votes})",
+                    color=discord.Color.red()
+                )
+                
+                await channel.send(embed=result_embed)
+                
                 # Обновляем таблицы статусов
                 await self.game.update_all_player_tables(bot)
-                logger.info(f"Игрок {target_player.name} исключен из игры в канале {self.game.channel_id}")
-            else:
-                result_embed.description += f"\n\n**{target_player.name}** остается в бункере!"
-                logger.info(f"Игрок {target_player.name} остается в игре в канале {self.game.channel_id}")
-            
-            # Деактивируем кнопки голосования
-            for item in vote_view.children:
-                item.disabled = True
-            
-            # Обновляем сообщение с результатами
-            await vote_message.edit(embed=result_embed, view=vote_view)
-            
-            # Проверяем, остался ли только один игрок
-            active_players = self.game.get_active_players()
-            if len(active_players) == 1:
-                winner = active_players[0]
-                winner_embed = discord.Embed(
-                    title="🏆 Игра завершена!",
-                    description=f"**{winner.name}** - единственный выживший в бункере! Поздравляем с победой!",
-                    color=discord.Color.gold()
-                )
-                await channel.send(embed=winner_embed)
                 
-                # Завершаем игру
-                self.game.status = "finished"
-                if self.game.channel_id in active_games:
-                    del active_games[self.game.channel_id]
-                logger.info(f"Игра завершена победой игрока {winner.name} в канале {self.game.channel_id}")
+                # Проверяем, остался ли только один игрок
+                active_players = self.game.get_active_players()
+                if len(active_players) == 1:
+                    winner = active_players[0]
+                    winner_embed = discord.Embed(
+                        title="🏆 Игра завершена!",
+                        description=f"**{winner.name}** - единственный выживший в бункере! Поздравляем с победой!",
+                        color=discord.Color.gold()
+                    )
+                    await channel.send(embed=winner_embed)
+                    
+                    # Завершаем игру
+                    self.game.status = "finished"
+                    if self.game.channel_id in active_games:
+                        del active_games[self.game.channel_id]
+                    logger.info(f"Игра завершена победой игрока {winner.name} в канале {self.game.channel_id}")
+                
+                await interaction.followup.send(f"Голосование завершено. Игрок {exile_player.name} исключен из бункера.", ephemeral=True)
+            
+            # Деактивируем кнопку завершения голосования
+            self.children[0].disabled = True
+            try:
+                await interaction.message.edit(view=self)
+            except discord.NotFound:
+                logger.warning("Сообщение с кнопкой завершения голосования не найдено")
+            except Exception as e:
+                logger.error(f"Ошибка при деактивации кнопки завершения голосования: {e}")
         except Exception as e:
-            logger.error(f"Ошибка при голосовании: {e}", exc_info=True)
+            logger.error(f"Ошибка при завершении голосования: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
-
-# Класс для кнопок голосования
-class VoteView(discord.ui.View):
-    """Класс представления с кнопками для голосования"""
-    
-    def __init__(self, game: BunkerGame, target_player: Player):
-        """
-        Инициализация представления для голосования
-        
-        Args:
-            game: Объект игры
-            target_player: Целевой игрок для голосования
-        """
-        super().__init__(timeout=None)
-        self.game = game
-        self.target_player = target_player
-        self.yes_votes = 0
-        self.no_votes = 0
-        self.voted_users = set()  # Множество пользователей, которые уже проголосовали
-    
-    @discord.ui.button(label="За исключение", style=discord.ButtonStyle.danger, custom_id="vote_yes")
-    async def vote_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Обработчик голоса за исключение"""
-        try:
-            # Проверяем, участвует ли пользователь в игре
-            is_player = any(player.id == interaction.user.id and player.is_active for player in self.game.players)
-            if not is_player:
-                await interaction.response.send_message("Вы не являетесь активным участником этой игры!", ephemeral=True)
-                return
-            
-            # Проверяем, не голосовал ли пользователь уже
-            if interaction.user.id in self.voted_users:
-                await interaction.response.send_message("Вы уже проголосовали!", ephemeral=True)
-                return
-            
-            # Учитываем голос
-            self.yes_votes += 1
-            self.voted_users.add(interaction.user.id)
-            
-            await interaction.response.send_message("Вы проголосовали за исключение игрока из бункера.", ephemeral=True)
-            logger.info(f"Игрок {interaction.user.name} проголосовал ЗА исключение {self.target_player.name}")
-        except Exception as e:
-            logger.error(f"Ошибка при голосовании за исключение: {e}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"Произошла ошибка: {e}", ephemeral=True)
-    
-    @discord.ui.button(label="Против исключения", style=discord.ButtonStyle.green, custom_id="vote_no")
-    async def vote_no(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Обработчик голоса против исключения"""
-        try:
-            # Проверяем, участвует ли пользователь в игре
-            is_player = any(player.id == interaction.user.id and player.is_active for player in self.game.players)
-            if not is_player:
-                await interaction.response.send_message("Вы не являетесь активным участником этой игры!", ephemeral=True)
-                return
-            
-            # Проверяем, не голосовал ли пользователь уже
-            if interaction.user.id in self.voted_users:
-                await interaction.response.send_message("Вы уже проголосовали!", ephemeral=True)
-                return
-            
-            # Учитываем голос
-            self.no_votes += 1
-            self.voted_users.add(interaction.user.id)
-            
-            await interaction.response.send_message("Вы проголосовали против исключения игрока из бункера.", ephemeral=True)
-            logger.info(f"Игрок {interaction.user.name} проголосовал ПРОТИВ исключения {self.target_player.name}")
-        except Exception as e:
-            logger.error(f"Ошибка при голосовании против исключения: {e}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message(f"Произошла ошибка: {e}", ephemeral=True)
 
 # Класс для кнопок действий игрока
 class PlayerActionView(discord.ui.View):
