@@ -67,7 +67,8 @@ class Player:
 
         # Генерация пола
         gender = random.choice(GameData.GENDERS)
-        years_old = random.randint(16, 95)
+        years_old = weighed_random(GameData.AGES)
+        years_old = random.randint(years_old[0], years_old[1])
         self.gender = f"{gender} ({years_old} лет)"
 
         # Генерация телосложения
@@ -142,12 +143,10 @@ class Player:
         self.description = ""
         self.description = await ai_client.generate_message([
             {"role": "system", "content": "You are a helpful assistant that generates character descriptions for a bunker game. Always respond in User language."},
-            {"role": "user", "content": f"""Сгенерируй краткую биографию для персонажа. 
+            {"role": "user", "content": f"""Сгенерируй краткое внешнее описание для персонажа. 
 В ответе оставь только само описание, не пиши ничего от своего имени.
-В биографию так-же включи: Имя, цвет глаз, цвет волос, цвет кожи (их тоже сделай случайными (НЕ ПУСТЫМИ!)).
-Никогда не оставляй пустые поля! 
-Сгенерируй биографию от лица персонажа. Сгенерируй всё одним предложением. 
-Вот досье персонажа, которого нужно сгенерировать: {self.get_character_card()}"""}])
+Придумай для персонажа: Имя, цвет глаз, цвет волос, стиль причёски, цвет кожи, стиль одежды, цвета одежды
+Вот досье персонажа, которого нужно сгенерировать (исходя из него, придумывай): {self.get_character_card()}"""}])
     
     def get_character_card(self) -> str:
         """
@@ -157,18 +156,18 @@ class Player:
             str: Форматированное описание персонажа
         """
         return (
-            f"{self.description}\n"
-            f"**Пол**: {self.gender}\n"
-            f"**Телосложение**: {self.body_type}\n"
-            f"**Человеческая черта**: {self.trait}\n"
-            f"**Профессия**: {self.profession}\n"
-            f"**Здоровье**: {self.health}\n"
-            f"**Хобби / Увлечение**: {self.hobby}\n"
-            f"**Фобия / Страх**: {self.phobia}\n"
-            f"**Крупный инвентарь**: {self.inventory}\n"
-            f"**Рюкзак**: {self.backpack}\n"
-            f"**Дополнительное сведение**: {self.additional}\n"
-            f"**Спец. возможность**: {self.special_ability}"
+            f"{self.description}\n\n"
+            f"> **Пол**: {self.gender}\n"
+            f"> **Телосложение**: {self.body_type}\n"
+            f"> **Человеческая черта**: {self.trait}\n"
+            f"> **Профессия**: {self.profession}\n"
+            f"> **Здоровье**: {self.health}\n"
+            f"> **Хобби / Увлечение**: {self.hobby}\n"
+            f"> **Фобия / Страх**: {self.phobia}\n"
+            f"> **Крупный инвентарь**: {self.inventory}\n"
+            f"> **Рюкзак**: {self.backpack}\n"
+            f"> **Дополнительное сведение**: {self.additional}\n"
+            f"> **Спец. возможность**: {self.special_ability}"
         )
     
     def reveal_attribute(self, attribute: str) -> bool:
@@ -224,7 +223,7 @@ class Bunker:
         self.duration = ""
         self.food = ""
         self.items = []
-        self.image_url = None
+        self.image = None  # Сохраняем PIL Image вместо URL
     
     async def generate(self) -> None:
         """Генерация случайного бункера"""
@@ -254,10 +253,10 @@ Answer only with prompt, without any other text.
 Generate "tags" for the prompt, like "dark, atmospheric, disaster, etc."
 The image should be dark, atmospheric, and show the interior of the bunker with all the mentioned items visible."""}])
 
-                self.image_url = await self.ai_client.generate_image(self.image_prompt)
+                self.image = await self.ai_client.generate_image(self.image_prompt)
             except Exception as e:
                 print(f"Ошибка при генерации изображения бункера: {e}")
-                self.image_url = None
+                self.image = None
         
     def get_description(self) -> str:
         """
@@ -278,6 +277,21 @@ The image should be dark, atmospheric, and show the interior of the bunker with 
             "В зависимости от того, что находится в бункере, вам предстоит определить, "
             "кто из выживших будет более полезен, учитывая данные обстоятельства."
         )
+        
+    def get_image_file(self) -> Optional[discord.File]:
+        """
+        Конвертирует PIL Image в файл Discord для отправки
+        
+        Returns:
+            Optional[discord.File]: Файл изображения или None, если изображение отсутствует
+        """
+        if self.image is None:
+            return None
+            
+        image_bytes = BytesIO()
+        self.image.save(image_bytes, format='PNG')
+        image_bytes.seek(0)
+        return discord.File(image_bytes, filename='bunker.png')
 
 
 class ImageGenerator:

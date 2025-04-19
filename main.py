@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from lib.ai_client import G4FClient
 from lib.bunker_game import BunkerGame, Player, Bunker, ImageGenerator
 from lib.logging_config import setup_logging
+from io import BytesIO
 
 # Настройка логирования
 logger = setup_logging()
@@ -21,10 +22,10 @@ intents.members = True
 intents.reactions = True
 
 
-from g4f.Provider import ImageLabs
+from g4f.Provider import RetryProvider, ImageLabs, Free2GPT
 ai_client = G4FClient(
-    model="gemini-2.0-flash", 
-    provider="Dynaspark",
+    model="gemini-1.5-flash", 
+    provider=RetryProvider([Free2GPT], shuffle=False),
     image_model="sdxl-turbo",
     image_provider=ImageLabs
 )
@@ -112,8 +113,9 @@ async def start_game(interaction: discord.Interaction):
         )
         
         # Если есть изображение бункера, добавляем его
-        if game.bunker.image_url:
-            bunker_embed.set_image(url=game.bunker.image_url)
+        if game.bunker.image:
+            bunker_file = game.bunker.get_image_file()
+            await channel.send(file=bunker_file)
         
         await channel.send(embed=bunker_embed)
         message = await channel.send(embed=embed, view=view)
@@ -127,36 +129,36 @@ async def start_game(interaction: discord.Interaction):
         logger.error(f"Ошибка при создании игры: {e}", exc_info=True)
         await interaction.followup.send("Произошла ошибка при создании игры. Попробуйте позже.", ephemeral=True)
 
-@bot.tree.command(name="analyze", description="Проанализировать шансы выживания текущего состава бункера")
-async def analyze_survival(interaction: discord.Interaction):
-    """Команда для анализа шансов выживания группы в бункере"""
-    channel = interaction.channel
+# @bot.tree.command(name="analyze", description="Проанализировать шансы выживания текущего состава бункера")
+# async def analyze_survival(interaction: discord.Interaction):
+#     """Команда для анализа шансов выживания группы в бункере"""
+#     channel = interaction.channel
     
-    # Проверка на существование активной игры в этом канале
-    if channel.id not in active_games:
-        await interaction.response.send_message("В этом канале нет активной игры.", ephemeral=True)
-        return
+#     # Проверка на существование активной игры в этом канале
+#     if channel.id not in active_games:
+#         await interaction.response.send_message("В этом канале нет активной игры.", ephemeral=True)
+#         return
     
-    game = active_games[channel.id]
+#     game = active_games[channel.id]
     
-    # Проверка, что игра запущена
-    if game.status != "running":
-        await interaction.response.send_message("Игра должна быть в активном состоянии для проведения анализа.", ephemeral=True)
-        return
+#     # Проверка, что игра запущена
+#     if game.status != "running":
+#         await interaction.response.send_message("Игра должна быть в активном состоянии для проведения анализа.", ephemeral=True)
+#         return
     
-    # Проверка, что пользователь является администратором игры
-    if interaction.user.id != game.admin_id:
-        await interaction.response.send_message("Только администратор игры может запустить анализ.", ephemeral=True)
-        return
+#     # Проверка, что пользователь является администратором игры
+#     if interaction.user.id != game.admin_id:
+#         await interaction.response.send_message("Только администратор игры может запустить анализ.", ephemeral=True)
+#         return
     
-    await interaction.response.send_message("🧠 Запускаю анализ выживания в бункере...", ephemeral=True)
+#     await interaction.response.send_message("🧠 Запускаю анализ выживания в бункере...", ephemeral=True)
     
-    try:
-        await game.analyze_bunker_survival(bot)
-        await interaction.followup.send("Анализ успешно выполнен!", ephemeral=True)
-    except Exception as e:
-        logger.error(f"Ошибка при выполнении анализа: {e}", exc_info=True)
-        await interaction.followup.send(f"Произошла ошибка при выполнении анализа: {e}", ephemeral=True)
+#     try:
+#         await game.analyze_bunker_survival(bot)
+#         await interaction.followup.send("Анализ успешно выполнен!", ephemeral=True)
+#     except Exception as e:
+#         logger.error(f"Ошибка при выполнении анализа: {e}", exc_info=True)
+#         await interaction.followup.send(f"Произошла ошибка при выполнении анализа: {e}", ephemeral=True)
 
 # Класс для кнопки присоединения к игре
 class JoinGameView(discord.ui.View):
@@ -497,15 +499,16 @@ class AdminControlView(discord.ui.View):
                     )
                     
                     # Если есть изображение бункера, добавляем его в ЛС
-                    if self.game.bunker.image_url:
+                    if self.game.bunker.image:
+                        bunker_file = self.game.bunker.get_image_file()
+                        dm_channel = await user.create_dm()
+                        # Добавляем описание изображения
                         bunker_image_embed = discord.Embed(
                             title=":palm_tree: Изображение внешней среды",
                             description=f"{self.game.bunker.image_prompt}",
                             color=discord.Color.gold()
                         )
-                        bunker_image_embed.set_image(url=self.game.bunker.image_url)
-                        dm_channel = await user.create_dm()
-                        await dm_channel.send(embed=bunker_image_embed)
+                        await dm_channel.send(embed=bunker_image_embed, file=bunker_file)
                     
                     # Информация о персонаже
                     player_embed = discord.Embed(
@@ -1229,12 +1232,19 @@ class GenerateImageButton(discord.ui.Button):
                 {"role": "system", "content": "You are Stable Diffusion prompt generator. Always respond in English"},
                 {"role": "user", "content": f"""Generate a Stable Diffusion prompt for following person: {self.player.get_character_card()}
 Answer only with prompt, without any other text.
-Describe person with "tags" like "A woman 38 years old, blonde hair, blue eyes, etc."
+Describe person with "tags" like "A woman 38 years old, blonde hair, blue eyes, etc.",
+Describe old or young, male or female, etc.
 """}])
             
             # Генерация изображения
             try:
-                image_url = await self.game.ai_client.generate_image(prompt)
+                image = await self.game.ai_client.generate_image(prompt)
+                
+                # Сохраняем изображение для отправки
+                image_bytes = BytesIO()
+                image.save(image_bytes, format='PNG')
+                image_bytes.seek(0)
+                file = discord.File(image_bytes, filename='character.png')
                 
                 # Создание эмбеда с изображением
                 embed = discord.Embed(
@@ -1242,10 +1252,9 @@ Describe person with "tags" like "A woman 38 years old, blonde hair, blue eyes, 
                     description=prompt,
                     color=discord.Color.blue()
                 )
-                embed.set_image(url=image_url)
                 
                 # Отправка изображения
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                await interaction.followup.send(embed=embed, file=file)
                 
                 # Обновляем состояние кнопки на успешное
                 await self.update_button_state(interaction, success=True)

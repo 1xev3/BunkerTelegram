@@ -1,4 +1,14 @@
 from typing import List, Dict, Any, Optional
+import base64
+import io
+from PIL import Image
+
+from lib.sd_api.api_models import txt2img_params
+from lib.sd_api.sd_api import WebUIApi
+
+import logging
+
+logger = logging.getLogger("ai_client")
 
 class AIClient:
     """Base class for working with LLM."""
@@ -21,7 +31,7 @@ class AIClient:
         """
         raise NotImplementedError("Subclasses must implement generate_message")
 
-    async def generate_image(self, prompt: str) -> str:
+    async def generate_image(self, prompt: str) -> Image.Image:
         """
         Generates an image from the model based on prompt.
         """
@@ -45,11 +55,42 @@ class G4FClient(AIClient):
         )
         return response.choices[0].message.content 
     
-    async def generate_image(self, prompt: str) -> str:
-        response = await self.image_client.images.generate(
-            model=self.image_model,
-            prompt=prompt,
-            response_format="url"
-        )
-        return response.data[0].url
+    # async def generate_image(self, prompt: str) -> Image.Image:
+    #     response = await self.image_client.images.generate(
+    #         model=self.image_model,
+    #         prompt=prompt,
+    #         response_format="b64_json"
+    #     )
+    #     # Convert base64 to PIL Image
+    #     image_bytes = base64.b64decode(response.data[0].b64_json)
+    #     image = Image.open(io.BytesIO(image_bytes))
+    #     return image
+
+    async def generate_image(self, prompt: str) -> Image.Image:
+
+        try:
+            api = WebUIApi()
+            params = txt2img_params()
+            params.prompt = f"masterpiece,best quality,amazing quality, {prompt}"
+            params.negative_prompt = "bad quality, worst quality, worst detail, censor, signature"
+            params.width = 832
+            params.height = 1216
+            params.batch_size = 1
+            params.n_iter = 1
+            
+            result = await api.txt2img(params)
+            return result.image
+        except Exception as e:
+            logger.error(f"Error generating image: {e}")
+            
+            response = await self.image_client.images.generate(
+                model=self.image_model,
+                prompt=prompt,
+                response_format="b64_json"
+            )
+            # Convert base64 to PIL Image
+            image_bytes = base64.b64decode(response.data[0].b64_json)
+            image = Image.open(io.BytesIO(image_bytes))
+            return image
+    
     
