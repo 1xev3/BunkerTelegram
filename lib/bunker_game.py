@@ -396,10 +396,10 @@ class ImageGenerator:
             player_data_rows = []
             column_widths = min_column_widths.copy()
             
-            for player in active_players:
+            for i, player in enumerate(active_players):
                 # Получаем данные игрока
                 player_data = [
-                    player.name,
+                    f"[{i+1}] {player.name}",
                     player.get_revealed_attribute("gender") or "?",
                     player.get_revealed_attribute("body") or "?",
                     player.get_revealed_attribute("trait") or "?",
@@ -626,13 +626,34 @@ class BunkerGame:
                     
                     if player.status_message_id:
                         try:
-                            message = await dm_channel.fetch_message(player.status_message_id)
-                            await message.delete()
-                        except:
-                            pass
-                    
-                    message = await dm_channel.send(file=status_image)
-                    player.status_message_id = message.id
+                            # Пытаемся получить старое сообщение
+                            old_message = await dm_channel.fetch_message(player.status_message_id)
+                            
+                            # Отправляем новое сообщение со статусом
+                            new_message = await dm_channel.send(
+                                content="**📊 Статус игроков (обновлено)**",
+                                file=status_image
+                            )
+                            
+                            # Обновляем ID сообщения
+                            player.status_message_id = new_message.id
+                            
+                            # Удаляем старое сообщение
+                            await old_message.delete()
+                        except Exception as e:
+                            # Если не можем найти старое сообщение, просто отправляем новое
+                            new_message = await dm_channel.send(
+                                content="**📊 Статус игроков**",
+                                file=status_image
+                            )
+                            player.status_message_id = new_message.id
+                    else:
+                        # Если сообщения еще нет, отправляем новое
+                        new_message = await dm_channel.send(
+                            content="**📊 Статус игроков**",
+                            file=status_image
+                        )
+                        player.status_message_id = new_message.id
                 except Exception as e:
                     print(f"Ошибка при обновлении таблицы для игрока {player.name}: {e}")
         except Exception as e:
