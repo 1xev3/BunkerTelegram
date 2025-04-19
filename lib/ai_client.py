@@ -36,6 +36,7 @@ class G4FClient(AIClient):
         super().__init__(model, provider, image_model, image_provider)
         from g4f.client import AsyncClient
         self.client = AsyncClient(provider=provider)
+        self.image_client = AsyncClient(provider=image_provider)
     
     async def generate_message(self, messages: List[Dict[str, str]]) -> str:
         response = await self.client.chat.completions.create(
@@ -45,7 +46,7 @@ class G4FClient(AIClient):
         return response.choices[0].message.content 
     
     async def generate_image(self, prompt: str) -> str:
-        response = await self.client.images.generate(
+        response = await self.image_client.images.generate(
             model=self.image_model,
             prompt=prompt,
             response_format="url"

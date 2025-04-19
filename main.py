@@ -1,12 +1,8 @@
 import discord
 from discord.ext import commands
-import asyncio
-import random
 import os
-import logging
-from typing import Dict, List, Optional, Union, Callable, Any
+from typing import Dict, List
 from dotenv import load_dotenv
-from discord import app_commands
 from lib.ai_client import G4FClient
 from lib.bunker_game import BunkerGame, Player, Bunker, ImageGenerator
 from lib.logging_config import setup_logging
@@ -25,11 +21,12 @@ intents.members = True
 intents.reactions = True
 
 
+from g4f.Provider import ImageLabs
 ai_client = G4FClient(
     model="gemini-2.0-flash", 
     provider="Dynaspark",
     image_model="sdxl-turbo",
-    image_provider="ARTA"
+    image_provider=ImageLabs
 )
 
 # Инициализация бота
@@ -218,15 +215,17 @@ class AdminControlView(discord.ui.View):
                 await interaction.followup.send("Для начала игры нужно минимум 2 игрока!", ephemeral=True)
                 return
             
+            channel = bot.get_channel(self.game.channel_id)
+            await channel.send("Генерация бункера...")
+            
             # Изменение состояния игры
             self.game.status = "running"
             
             # Генерация бункера и персонажей
-            self.game.generate_bunker()
+            await self.game.generate_bunker()
             await self.game.generate_player_cards()
             
             # Уведомление в канале
-            channel = bot.get_channel(self.game.channel_id)
             await channel.send("Игра началась! Всем игрокам отправлена информация в личных сообщениях.")
             
             # Отправка информации игрокам
@@ -418,6 +417,20 @@ class AdminControlView(discord.ui.View):
     
     async def send_game_info_to_players(self) -> None:
         """Отправка информации о бункере и картах персонажей каждому игроку"""
+        # Отправка изображения бункера в общий чат
+        channel = bot.get_channel(self.game.channel_id)
+        if self.game.bunker.image_url:
+            try:
+                bunker_embed = discord.Embed(
+                    title=":palm_tree: Изображение внешней среды",
+                    description=f"{self.game.bunker.image_prompt}",
+                    color=discord.Color.gold()
+                )
+                bunker_embed.set_image(url=self.game.bunker.image_url)
+                await channel.send(embed=bunker_embed)
+            except Exception as e:
+                logger.error(f"Ошибка при отправке изображения бункера: {e}")
+
         for player in self.game.players:
             user = bot.get_user(player.id)
             if user:
@@ -425,7 +438,7 @@ class AdminControlView(discord.ui.View):
                     # Информация о бункере
                     bunker_embed = discord.Embed(
                         title="🏢 Информация о бункере",
-                        description=await self.game.bunker.get_description(),
+                        description=self.game.bunker.get_description(),
                         color=discord.Color.gold()
                     )
                     
