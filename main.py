@@ -78,7 +78,7 @@ async def start_game(interaction: discord.Interaction):
         return
     
     # Отправляем сообщение о начале генерации бункера
-    await interaction.response.send_message("🔄 Генерирую бункер...", ephemeral=True)
+    await interaction.response.send_message("🔄 Генерирую бункер...")
     
     try:
         # Создание новой игры
@@ -293,31 +293,6 @@ class AdminControlView(discord.ui.View):
         except Exception as e:
             logger.error(f"Ошибка при запуске игры: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка при запуске игры: {e}", ephemeral=True)
-    
-    @discord.ui.button(label="Следующий раунд", style=discord.ButtonStyle.primary, custom_id="next_round", row=1)
-    async def next_round_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Обработчик нажатия кнопки следующего раунда"""
-        try:
-            # Отложенный ответ
-            await interaction.response.defer(ephemeral=True)
-            
-            # Проверка, запущена ли игра
-            if self.game.status != "running":
-                await interaction.followup.send("Игра еще не запущена или уже завершена!", ephemeral=True)
-                return
-            
-            # Переход к следующему раунду
-            round_num = self.game.next_round()
-            
-            # Уведомление в канале
-            channel = bot.get_channel(self.game.channel_id)
-            await channel.send(f"Начинается раунд {round_num}! Обсудите, кого следует исключить из бункера.")
-            
-            await interaction.followup.send(f"Вы начали раунд {round_num}.", ephemeral=True)
-            logger.info(f"Начат раунд {round_num} в игре в канале {self.game.channel_id}")
-        except Exception as e:
-            logger.error(f"Ошибка при переходе к следующему раунду: {e}", exc_info=True)
-            await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
     
     @discord.ui.button(label="Начать голосование", style=discord.ButtonStyle.danger, custom_id="exile_player", row=1)
     async def exile_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1224,7 +1199,7 @@ class GenerateImageButton(discord.ui.Button):
             await self.update_button_state(interaction)
             
             # Отправляем сообщение о начале генерации
-            await interaction.followup.send("🔄 Начинаю генерацию изображения вашего персонажа...", ephemeral=True)
+            # await interaction.followup.send("🔄 Начинаю генерацию изображения вашего персонажа...", ephemeral=True)
             
             # Создание промпта для генерации изображения
             logger.info(f"Генерация изображения для персонажа {self.player.name}")

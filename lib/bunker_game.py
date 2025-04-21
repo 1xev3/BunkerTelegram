@@ -66,10 +66,11 @@ class Player:
         """Генерация случайных характеристик персонажа"""
 
         # Генерация пола
-        gender = random.choice(GameData.GENDERS)
+        gender = weighed_random(GameData.GENDERS)
+        gender_affix = weighed_random(GameData.GENDER_AFFIXES)
         years_old = weighed_random(GameData.AGES)
         years_old = random.randint(years_old[0], years_old[1])
-        self.gender = f"{gender} ({years_old} лет)"
+        self.gender = f"{gender} {gender_affix} ({years_old} лет)"
 
         # Генерация телосложения
         body_type = weighed_random(GameData.BODY_TYPES)
@@ -227,20 +228,32 @@ class Bunker:
     
     async def generate(self) -> None:
         """Генерация случайного бункера"""
+        self.theme = random.choice(GameData.BUNKER_THEMES)
         self.size = random.choice(GameData.BUNKER_SIZES)
         self.duration = random.choice(GameData.BUNKER_DURATIONS)
         self.food = random.choice(GameData.FOOD_SUPPLIES)
         # Выбираем от 2 до 5 случайных предметов
         self.items = random.sample(GameData.BUNKER_ITEMS, k=random.randint(1, GameData.BUNKER_ITEMS_COUNT_MAX))
+        items_str = ", ".join(self.items)
 
         self.disaster_info = await self.ai_client.generate_message([
             {"role": "system", "content": "You are a helpful assistant that generates bunker disaster descriptions for a bunker game. Always respond in User language."},
             {"role": "user", "content": f"""Сгенерируй случайный смертельный катаклизм для игры в\
-бункер на тему: {random.choice(GameData.BUNKER_THEMES)}. 
-Катаклизм - это то что происходит за пределами бункера! 
+бункер на тему: {self.theme}. 
+Катаклизм - это то что происходит за пределами бункера! Не упоминай бункер в описании катаклизма.
 В зависимости от этого игроки будут выбирать кто заслуживает место в бункере. 
 В ответе оставь только само описание, не пиши ничего от своего имени. 
-В ответе укажи название катаклизма, его описание и последствия."""}])
+В ответе укажи название катаклизма, его описание и с чём предстоит столкнуться вне бункера."""}])
+        
+        self.bunker_info = await self.ai_client.generate_message([
+            {"role": "system", "content": "You are description generator for a bunker game. Always respond in User language."},
+            {"role": "user", "content": f"""Сгенерируй краткое описание бункера по его характеристикам. Придумай какие комнаты в нём есть (в зависимости от размера и предметов в нём).
+В ответе оставь только само описание, не пиши ничего от своего имени. 
+Вот характеристики бункера: 
+Размер: {self.size}
+Еда: {self.food}
+Предметы: {items_str}
+"""}])
 
         # Генерация изображения бункера
         if GameData.GENERATE_IMAGE:
@@ -268,12 +281,14 @@ The image should be dark, atmospheric, and show the interior of the bunker with 
         items_str = ", ".join(self.items)
 
         return (
-            "**Описание найденного бункера**\n\n"
+            "**Информация о бедствии:**\n"
             f"{self.disaster_info}\n\n"
-            f"**Размер бункера**: {self.size}\n"
-            f"**Время нахождения**: {self.duration}\n"
-            f"**Количество еды**: {self.food}\n"
-            f"**В бункере имеется**: {items_str}\n\n"
+            "**Описание бункера:**\n"
+            f"{self.bunker_info}\n\n"
+            f"> **Размер бункера**: {self.size}\n"
+            f"> **Время нахождения**: {self.duration}\n"
+            f"> **Количество еды**: {self.food}\n"
+            f"> **В бункере имеется**: {items_str}\n\n"
             "В зависимости от того, что находится в бункере, вам предстоит определить, "
             "кто из выживших будет более полезен, учитывая данные обстоятельства."
         )
