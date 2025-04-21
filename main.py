@@ -6,7 +6,7 @@ import os
 from typing import Dict, List
 from dotenv import load_dotenv
 from lib.ai_client import G4FClient
-from lib.bunker_game import BunkerGame, Player, Bunker, ImageGenerator
+from lib.bunker_game import BunkerGame, Player
 from lib.logging_config import setup_logging
 from io import BytesIO
 
@@ -16,6 +16,9 @@ logger = setup_logging()
 # Загрузка переменных окружения
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+
+# Proxy configuration
+PROXY_URL = os.getenv('PROXY_URL')
 
 # Настройка интентов
 intents = discord.Intents.default()
@@ -29,7 +32,8 @@ ai_client = G4FClient(
     model="gemini-1.5-flash", 
     provider=RetryProvider([Free2GPT], shuffle=False),
     image_model="sdxl-turbo",
-    image_provider=ImageLabs
+    image_provider=ImageLabs,
+    # proxies=PROXY_URL
 )
 
 # Инициализация бота
@@ -90,7 +94,7 @@ async def start_game(interaction: discord.Interaction):
         
         # Генерация бункера до начала игры
         async for status_msg in game.generate_bunker():
-            await msg.edit(content=f"{msg.content}\n-# {status_msg}")
+            await msg.edit(content=f"{msg.content}\n\n-# {status_msg}")
         
         # Сохраняем игру в активных
         active_games[channel.id] = game
@@ -463,50 +467,52 @@ class AdminControlView(discord.ui.View):
                         await dm_channel.send(embed=bunker_image_embed, file=bunker_file)
                     
                     # Информация о персонаже
-                    player_embed = discord.Embed(
-                        title="👤 Ваш персонаж",
-                        description=player.get_character_card(),
-                        color=discord.Color.green()
-                    )
+                    # player_embed = discord.Embed(
+                    #     title="👤 Ваш персонаж",
+                    #     description=player.get_character_card(),
+                    #     color=discord.Color.green()
+                    # )
                     
                     # Отправка сообщений
                     dm_channel = await user.create_dm()
                     await dm_channel.send(embed=bunker_embed)
                     
                     # Отправка карточки и кнопок действий
-                    view = PlayerActionView(self.game, player)
-                    message = await dm_channel.send(embed=player_embed, view=view)
-                    player.message_id = message.id
+                    # view = PlayerActionView(self.game, player)
+                    # message = await dm_channel.send(embed=player_embed, view=view)
+                    # player.message_id = message.id
                     
                     # Отправка таблицы с характеристиками всех игроков
-                    await self.send_player_status_table(user, player)
+                    # await self.send_player_status_table(user, player)
                     
                     logger.info(f"Отправлена информация игроку {player.name}")
                 except Exception as e:
                     logger.error(f"Ошибка при отправке информации игроку {player.name}: {e}", exc_info=True)
-    
-    async def send_player_status_table(self, user: discord.User, player: Player) -> None:
-        """
-        Отправка таблицы статусов игроку
         
-        Args:
-            user: Объект пользователя Discord
-            player: Объект игрока
-        """
-        # Генерация и отправка изображения
-        try:
-            status_image = self.game.generate_status_image()
-            if status_image:
-                dm_channel = await user.create_dm()
-                view = PlayerActionView(self.game, player)
-                message = await dm_channel.send(
-                    content="**📊 Статус игроков**",
-                    file=status_image,
-                    view=view
-                )
-                player.status_message_id = message.id
-        except Exception as e:
-            logger.error(f"Ошибка при отправке таблицы статусов: {e}", exc_info=True)
+        await update_all_player_tables(self.game, bot)
+    
+    # async def send_player_status_table(self, user: discord.User, player: Player) -> None:
+    #     """
+    #     Отправка таблицы статусов игроку
+        
+    #     Args:
+    #         user: Объект пользователя Discord
+    #         player: Объект игрока
+    #     """
+    #     # Генерация и отправка изображения
+    #     try:
+    #         status_image = self.game.generate_status_image()
+    #         if status_image:
+    #             dm_channel = await user.create_dm()
+    #             view = PlayerActionView(self.game, player)
+    #             message = await dm_channel.send(
+    #                 content="**📊 Статус игроков**",
+    #                 file=status_image,
+    #                 view=view
+    #             )
+    #             player.status_message_id = message.id
+    #     except Exception as e:
+    #         logger.error(f"Ошибка при отправке таблицы статусов: {e}", exc_info=True)
 
 # Класс для выбора игрока для голосования всеми участниками
 class VotingView(discord.ui.View):
@@ -721,8 +727,8 @@ class PlayerVoteSelect(discord.ui.Select):
                     except Exception as e:
                         logger.error(f"Ошибка при отправке результатов игроку {player.name}: {e}", exc_info=True)
                 
-                # Обновляем таблицы статусов
-                await self.game.update_all_player_tables(bot, PlayerActionView)
+                # Обновление у всех игроков
+                await update_all_player_tables(self.game, bot)
                 
                 # Проверяем, остался ли только один игрок
                 active_players = self.game.get_active_players()
@@ -846,8 +852,8 @@ class AdminVoteControlView(discord.ui.View):
                 
                 await channel.send(embed=result_embed)
                 
-                # Обновляем таблицы статусов
-                await self.game.update_all_player_tables(bot, PlayerActionView)
+                # Обновление у всех игроков
+                await update_all_player_tables(self.game, bot)
                 
                 # Проверяем, остался ли только один игрок
                 active_players = self.game.get_active_players()
@@ -905,7 +911,7 @@ class PlayerActionView(discord.ui.View):
         ]
         
         for label, attr in characteristics:
-            btn = RevealButton(label, attr)
+            btn = RevealButton(label, attr, self.game)
             if self.player.get_revealed_attribute(attr):
                 btn.disabled = True
             self.add_item(btn)
@@ -971,7 +977,7 @@ class RevealAllButton(discord.ui.Button):
             
             if revealed_count > 0:
                 # Обновление у всех игроков
-                await self.game.update_all_player_tables(bot, PlayerActionView)
+                await update_all_player_tables(self.game, bot)
                 
                 # Уведомление в канале
                 channel = bot.get_channel(game.channel_id)
@@ -1055,13 +1061,14 @@ class SpecialAbilityButton(discord.ui.Button):
 class RevealButton(discord.ui.Button):
     """Кнопка для раскрытия характеристики игрока"""
     
-    def __init__(self, label: str, attribute: str):
+    def __init__(self, label: str, attribute: str, game: BunkerGame):
         """
         Инициализация кнопки
         
         Args:
             label: Метка кнопки
             attribute: Имя атрибута для раскрытия
+            game: Объект игры
         """
         super().__init__(
             label=f"Открыть {label.lower()}", 
@@ -1069,6 +1076,7 @@ class RevealButton(discord.ui.Button):
             custom_id=f"reveal_{attribute}"
         )
         self.attribute = attribute
+        self.game = game
 
     async def _deactivate(self, interaction: discord.Interaction):
         self.disabled = True
@@ -1110,7 +1118,7 @@ class RevealButton(discord.ui.Button):
             # Раскрытие характеристики
             if player.reveal_attribute(self.attribute):
                 # Обновление у всех игроков
-                await game.update_all_player_tables(bot, PlayerActionView)
+                await update_all_player_tables(game, bot)
                 
                 # Уведомление в канале
                 channel = bot.get_channel(game.channel_id)
@@ -1245,6 +1253,59 @@ Describe old or young, male or female, etc.
             await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
             # Обновляем состояние кнопки на ошибку
             await self.update_button_state(interaction, success=False)
+
+async def update_all_player_tables(game: BunkerGame, bot) -> None:
+    """
+    Обновление таблиц статусов для всех активных игроков
+    
+    Args:
+        game: Объект игры
+        bot: Объект бота Discord
+    """
+    try:
+        # Обновляем для каждого активного игрока
+        for player in (p for p in game.players if p.is_active):
+            user = bot.get_user(player.id)
+            if not user:
+                continue
+                
+            try:
+                dm_channel = await user.create_dm()
+                
+                # Подготавливаем сообщение
+                player_embed = discord.Embed(
+                    title="👤 Ваш персонаж",
+                    description=player.get_character_card(),
+                    color=discord.Color.green()
+                )
+
+                # Нужно каждый раз генерировать discord.File
+                status_image_bytes = game.generate_status_image()
+                status_image = discord.File(status_image_bytes, filename='status.png')
+                
+                message_content = {
+                    "content": "**📊 Статус игроков**",
+                    "file": status_image,
+                    "embed": player_embed,
+                    "view": PlayerActionView(game, player)
+                }
+                
+                # Обновляем или создаем сообщение
+                if player.status_message_id:
+                    try:
+                        old_message = await dm_channel.fetch_message(player.status_message_id)
+                        await old_message.delete()
+                    except:
+                        pass
+                        
+                new_message = await dm_channel.send(**message_content)
+                player.status_message_id = new_message.id
+                
+            except Exception as e:
+                logger.error(f"Ошибка обновления для игрока {player.name}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Ошибка обновления таблиц статуса: {e}")
 
 # Запуск бота
 if __name__ == "__main__":

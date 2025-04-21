@@ -34,7 +34,7 @@ class Player:
         
         # Характеристики персонажа
         self.gender = ""
-        self.body_type = ""
+        self.body = ""
         self.trait = ""
         self.profession = ""
         self.health = ""
@@ -44,7 +44,7 @@ class Player:
         self.backpack = ""
         self.additional = ""
         self.special_ability = ""
-        
+
         # Открытые характеристики
         self.revealed_attributes = {
             "gender": False,
@@ -73,7 +73,7 @@ class Player:
         self.gender = f"{gender} {gender_affix} ({years_old} лет)"
 
         # Генерация телосложения
-        body_type = weighed_random(GameData.BODY_TYPES)
+        body = weighed_random(GameData.BODY_TYPES)
         
         # Генерация роста в зависимости от возраста
         if years_old < 18:
@@ -95,7 +95,7 @@ class Player:
         
         # Ограничение роста разумными пределами
         body_height = max(150, min(210, body_height))
-        self.body_type = f"{body_type} ({body_height} см)"
+        self.body = f"{body} ({body_height} см)"
         self.trait = random.choice(GameData.TRAITS)
         
         # Генерация профессии с уровнем
@@ -149,6 +149,20 @@ class Player:
 Придумай для персонажа: Имя, цвет глаз, цвет волос, стиль причёски, цвет кожи, стиль одежды, цвета одежды
 Вот досье персонажа, которого нужно сгенерировать (исходя из него, придумывай): {self.get_character_card()}"""}])
     
+    def get_formatted_attribute(self, attribute: str) -> str:
+        """
+        Получение форматированной характеристики персонажа
+        
+        Args:
+            attribute: Имя характеристики
+        """
+
+        revealed_attr = self.get_revealed_attribute(attribute)
+        if revealed_attr:
+            return f"`~~{revealed_attr}~~`"
+        else:
+            return getattr(self, attribute, "err")
+
     def get_character_card(self) -> str:
         """
         Получение форматированной карточки персонажа
@@ -158,17 +172,17 @@ class Player:
         """
         return (
             f"{self.description}\n\n"
-            f"> **Пол**: {self.gender}\n"
-            f"> **Телосложение**: {self.body_type}\n"
-            f"> **Человеческая черта**: {self.trait}\n"
-            f"> **Профессия**: {self.profession}\n"
-            f"> **Здоровье**: {self.health}\n"
-            f"> **Хобби / Увлечение**: {self.hobby}\n"
-            f"> **Фобия / Страх**: {self.phobia}\n"
-            f"> **Крупный инвентарь**: {self.inventory}\n"
-            f"> **Рюкзак**: {self.backpack}\n"
-            f"> **Дополнительное сведение**: {self.additional}\n"
-            f"> **Спец. возможность**: {self.special_ability}"
+            f"> **Пол**: {self.get_formatted_attribute('gender')}\n"
+            f"> **Телосложение**: {self.get_formatted_attribute('body')}\n"
+            f"> **Человеческая черта**: {self.get_formatted_attribute('trait')}\n"
+            f"> **Профессия**: {self.get_formatted_attribute('profession')}\n"
+            f"> **Здоровье**: {self.get_formatted_attribute('health')}\n"
+            f"> **Хобби / Увлечение**: {self.get_formatted_attribute('hobby')}\n"
+            f"> **Фобия / Страх**: {self.get_formatted_attribute('phobia')}\n"
+            f"> **Крупный инвентарь**: {self.get_formatted_attribute('inventory')}\n"
+            f"> **Рюкзак**: {self.get_formatted_attribute('backpack')}\n"
+            f"> **Дополнительное сведение**: {self.get_formatted_attribute('additional')}\n"
+            f"> **Спец. возможность**: {self.get_formatted_attribute('special_ability')}"
         )
     
     def reveal_attribute(self, attribute: str) -> bool:
@@ -197,19 +211,19 @@ class Player:
             Optional[str]: Значение атрибута или None, если не раскрыт
         """
         if self.revealed_attributes.get(attribute, False):
-            attribute_map = {
-                "gender": self.gender,
-                "body": self.body_type,
-                "trait": self.trait,
-                "profession": self.profession,
-                "health": self.health,
-                "hobby": self.hobby,
-                "phobia": self.phobia,
-                "inventory": self.inventory,
-                "backpack": self.backpack,
-                "additional": self.additional
-            }
-            return attribute_map.get(attribute)
+            # attribute_map = {
+            #     "gender": self.gender,
+            #     "body": self.body_type,
+            #     "trait": self.trait,
+            #     "profession": self.profession,
+            #     "health": self.health,
+            #     "hobby": self.hobby,
+            #     "phobia": self.phobia,
+            #     "inventory": self.inventory,
+            #     "backpack": self.backpack,
+            #     "additional": self.additional
+            # }
+            return getattr(self, attribute, "err") #attribute_map.get(attribute)
         return None
 
 
@@ -352,7 +366,7 @@ class ImageGenerator:
         return lines, total_height
     
     @staticmethod
-    def generate_status_image(players: List[Player]) -> discord.File:
+    def generate_status_image(players: List[Player]) -> BytesIO:
         """
         Генерация изображения с таблицей статусов игроков
         
@@ -360,21 +374,20 @@ class ImageGenerator:
             players: Список игроков
             
         Returns:
-            discord.File: Файл с изображением таблицы статусов
+            BytesIO: Файл с изображением таблицы статусов
         """
         try:
             # Используем всех игроков вместо только активных
             all_players = players
             
-            # Определяем шрифты и цвета
+            # Определяем шрифты и цвета в стиле Material Design
             font_path = os.path.join(os.path.dirname(__file__), 'fonts/arial.ttf')
             if not os.path.exists(font_path):
-                # Пробуем различные распространенные пути к шрифтам
                 possible_paths = [
-                    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",  # Linux
-                    "/usr/share/fonts/TTF/Arial.ttf",                   # Arch Linux
-                    "C:/Windows/Fonts/arial.ttf",                       # Windows
-                    "/System/Library/Fonts/Arial.ttf"                   # macOS
+                    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+                    "/usr/share/fonts/TTF/Arial.ttf",
+                    "C:/Windows/Fonts/arial.ttf",
+                    "/System/Library/Fonts/Arial.ttf"
                 ]
                 
                 for path in possible_paths:
@@ -382,24 +395,36 @@ class ImageGenerator:
                         font_path = path
                         break
                 else:
-                    # Если ничего не найдено, используем стандартный шрифт
                     header_font = ImageFont.load_default()
                     cell_font = ImageFont.load_default()
                     font_path = "default"
             
             if font_path != "default":
                 try:
-                    header_font = ImageFont.truetype(font_path, 16)
-                    cell_font = ImageFont.truetype(font_path, 14)
+                    header_font = ImageFont.truetype(font_path, 18)  # Увеличили размер шрифта заголовка
+                    cell_font = ImageFont.truetype(font_path, 14)   # Увеличили размер шрифта ячеек
                 except:
                     header_font = ImageFont.load_default()
                     cell_font = ImageFont.load_default()
+            
+            # Material Design цвета
+            colors = {
+                'background': (250, 250, 250),      # Светло-серый фон
+                'header_bg': (33, 150, 243),        # Material Blue
+                'header_text': (255, 255, 255),     # Белый текст заголовка
+                'row_even': (255, 255, 255),        # Белый для четных строк
+                'row_odd': (245, 245, 245),         # Светло-серый для нечетных строк
+                'text': (33, 33, 33),               # Темно-серый текст
+                'inactive_text': (158, 158, 158),   # Серый для неактивных игроков
+                'border': (224, 224, 224),          # Светло-серая граница
+                'shadow': (0, 0, 0, 30)             # Тень для заголовка
+            }
             
             # Определяем колонки
             columns = ["Игрок", "Пол", "Тело", "Черта", "Проф.", "Здоровье", "Хобби", "Фобия", "Инв.", "Рюкзак", "Доп."]
             
             # Определяем максимальные ширины для каждой колонки
-            max_column_widths = [200, 100, 150, 150, 150, 150, 150, 150, 150, 200, 200]
+            max_column_widths = [200, 150, 150, 150, 150, 150, 150, 150, 150, 200, 200]
             
             # Рассчитываем минимальные ширины колонок на основе заголовков
             min_column_widths = []
@@ -408,14 +433,13 @@ class ImageGenerator:
                     width = header_font.getbbox(column)[2]
                 else:
                     width = header_font.getsize(column)[0]
-                min_column_widths.append(width + 20)  # Добавляем отступ
+                min_column_widths.append(width + 30)  # Увеличили отступ
             
             # Подготавливаем данные игроков и рассчитываем необходимую ширину для каждой колонки
             player_data_rows = []
             column_widths = min_column_widths.copy()
             
             for i, player in enumerate(all_players):
-                # Получаем данные игрока
                 player_data = [
                     f"[{i+1}] {player.name}",
                     player.get_revealed_attribute("gender") or "?",
@@ -431,19 +455,17 @@ class ImageGenerator:
                 ]
                 player_data_rows.append((player_data, player.is_active))
                 
-                # Обновляем ширину колонок на основе содержимого ячеек
                 for i, data in enumerate(player_data):
                     if hasattr(cell_font, 'getbbox'):
                         width = cell_font.getbbox(data)[2]
                     else:
                         width = cell_font.getsize(data)[0]
-                    # Устанавливаем ширину колонки, но не больше максимальной
-                    column_widths[i] = min(max(column_widths[i], width + 20), max_column_widths[i])
+                    column_widths[i] = min(max(column_widths[i], width + 30), max_column_widths[i])
             
             # Рассчитываем размеры изображения
-            padding = 10
-            header_height = 40
-            min_cell_height = 30  # Минимальная высота ячейки
+            padding = 20  # Увеличили отступы
+            header_height = 50  # Увеличили высоту заголовка
+            min_cell_height = 40  # Увеличили минимальную высоту ячейки
             
             # Рассчитываем высоту для каждого ряда
             row_heights = []
@@ -451,33 +473,33 @@ class ImageGenerator:
             for player_data, is_active in player_data_rows:
                 max_height = min_cell_height
                 for i, data in enumerate(player_data):
-                    # Используем установленную ширину колонки для переноса текста
-                    lines, height = ImageGenerator.wrap_text(data, column_widths[i] - 10, cell_font)
-                    max_height = max(max_height, height + 10)  # Добавляем отступ
+                    lines, height = ImageGenerator.wrap_text(data, column_widths[i] - 20, cell_font)
+                    max_height = max(max_height, height + 15)  # Увеличили отступ
                 row_heights.append(max_height)
             
-            # Общая ширина изображения
+            # Общая ширина и высота изображения
             width = sum(column_widths) + padding * 2
-            # Общая высота изображения
             height = header_height + sum(row_heights) + padding * 2
             
             # Создаем изображение
-            image = Image.new('RGB', (width, height), color=(255, 255, 255))
+            image = Image.new('RGB', (width, height), color=colors['background'])
             draw = ImageDraw.Draw(image)
             
-            # Рисуем заголовок
+            # Рисуем заголовок с тенью
             x = padding
             y = padding
             
+            # Рисуем тень заголовка
+            shadow_rect = (x, y + 2, x + sum(column_widths), y + header_height + 2)
+            draw.rectangle(shadow_rect, fill=colors['shadow'])
+            
+            # Рисуем сам заголовок
+            header_rect = (x, y, x + sum(column_widths), y + header_height)
+            draw.rectangle(header_rect, fill=colors['header_bg'])
+            
+            # Рисуем текст заголовка
+            x = padding
             for i, column in enumerate(columns):
-                # Рисуем ячейку заголовка
-                draw.rectangle(
-                    (x, y, x + column_widths[i], y + header_height),
-                    outline=(0, 0, 0),
-                    fill=(200, 200, 200)
-                )
-                
-                # Центрируем текст заголовка
                 if hasattr(header_font, 'getbbox'):
                     text_width = header_font.getbbox(column)[2]
                     text_height = header_font.getbbox(column)[3]
@@ -487,8 +509,7 @@ class ImageGenerator:
                 text_x = x + (column_widths[i] - text_width) / 2
                 text_y = y + (header_height - text_height) / 2
                 
-                draw.text((text_x, text_y), column, font=header_font, fill=(0, 0, 0))
-                
+                draw.text((text_x, text_y), column, font=header_font, fill=colors['header_text'])
                 x += column_widths[i]
             
             # Рисуем данные игроков
@@ -498,29 +519,27 @@ class ImageGenerator:
                 x = padding
                 
                 for i, data in enumerate(player_data):
-                    # Рисуем ячейку
-                    cell_color = (230, 230, 230) if row % 2 == 0 else (255, 255, 255)
+                    # Выбираем цвет фона в зависимости от четности строки
+                    cell_color = colors['row_even'] if row % 2 == 0 else colors['row_odd']
                     
-                    draw.rectangle(
-                        (x, current_y, x + column_widths[i], current_y + row_height),
-                        outline=(0, 0, 0),
-                        fill=cell_color
-                    )
+                    # Рисуем ячейку с закругленными углами
+                    cell_rect = (x, current_y, x + column_widths[i], current_y + row_height)
+                    draw.rectangle(cell_rect, fill=cell_color, outline=colors['border'])
                     
                     # Делаем перенос текста и отрисовываем его
-                    lines, _ = ImageGenerator.wrap_text(data, column_widths[i] - 10, cell_font)
+                    lines, _ = ImageGenerator.wrap_text(data, column_widths[i] - 20, cell_font)
                     line_height = (cell_font.getbbox('A')[3] if hasattr(cell_font, 'getbbox') else cell_font.getsize('A')[1]) + 4
                     
-                    # Рассчитываем вертикальный отступ, чтобы текст был по центру вертикально
+                    # Рассчитываем вертикальный отступ
                     total_text_height = len(lines) * line_height
                     y_offset = (row_height - total_text_height) / 2
                     
-                    # Определяем цвет текста в зависимости от активности игрока
-                    text_color = (255, 0, 0) if not is_active else (0, 0, 0)
+                    # Выбираем цвет текста в зависимости от активности игрока
+                    text_color = colors['inactive_text'] if not is_active else colors['text']
                     
                     for j, line in enumerate(lines):
                         line_y = current_y + y_offset + j * line_height
-                        draw.text((x + 5, line_y), line, font=cell_font, fill=text_color)
+                        draw.text((x + 10, line_y), line, font=cell_font, fill=text_color)
                     
                     x += column_widths[i]
                 
@@ -530,13 +549,15 @@ class ImageGenerator:
             image_bytes = BytesIO()
             image.save(image_bytes, format='PNG')
             image_bytes.seek(0)
+
+            return image_bytes
             
-            return discord.File(image_bytes, filename='status.png')
+            # return discord.File(image_bytes, filename='status.png')
         
         except Exception as e:
             print(f"Ошибка при создании изображения: {e}")
             # Создаем простое изображение с сообщением об ошибке
-            error_image = Image.new('RGB', (400, 100), color=(255, 255, 255))
+            error_image = Image.new('RGB', (400, 100), color=colors['background'])
             draw = ImageDraw.Draw(error_image)
             
             try:
@@ -545,7 +566,6 @@ class ImageGenerator:
             except:
                 draw.text((10, 10), "Ошибка создания изображения", fill=(255, 0, 0))
             
-            # Сохраняем изображение ошибки в байты
             error_bytes = BytesIO()
             error_image.save(error_bytes, format='PNG')
             error_bytes.seek(0)
@@ -624,67 +644,6 @@ class BunkerGame:
             discord.File: Файл с изображением таблицы статусов
         """
         return ImageGenerator.generate_status_image(self.players)
-    
-    async def update_all_player_tables(self, bot, player_action_view: discord.ui.View = None) -> None:
-        """
-        Обновление таблиц статусов для всех игроков
-        
-        Args:
-            bot: Объект бота Discord
-        """
-        try:
-            # Генерируем изображение для каждого игрока отдельно
-            for player in self.players:
-                if not player.is_active:
-                    continue
-                
-                user = bot.get_user(player.id)
-                if not user:
-                    continue
-                
-                try:
-                    # Создаем новое изображение для каждого игрока
-                    status_image = self.generate_status_image()
-                    
-                    dm_channel = await user.create_dm()
-                    
-                    if player.status_message_id:
-                        try:
-                            # Пытаемся получить старое сообщение
-                            old_message = await dm_channel.fetch_message(player.status_message_id)
-                            
-                            # Отправляем новое сообщение со статусом
-                            new_message = await dm_channel.send(
-                                content="**📊 Статус игроков**",
-                                file=status_image,
-                                view=player_action_view(self, player)
-                            )
-                            
-                            # Обновляем ID сообщения
-                            player.status_message_id = new_message.id
-                            
-                            # Удаляем старое сообщение
-                            await old_message.delete()
-                        except Exception as e:
-                            # Если не можем найти старое сообщение, просто отправляем новое
-                            new_message = await dm_channel.send(
-                                content="**📊 Статус игроков**",
-                                file=status_image,
-                                view=player_action_view(self, player)
-                            )
-                            player.status_message_id = new_message.id
-                    else:
-                        # Если сообщения еще нет, отправляем новое
-                        new_message = await dm_channel.send(
-                            content="**📊 Статус игроков**",
-                            file=status_image,
-                            view=player_action_view(self, player)
-                        )
-                        player.status_message_id = new_message.id
-                except Exception as e:
-                    print(f"Ошибка при обновлении таблицы для игрока {player.name}: {e}")
-        except Exception as e:
-            print(f"Ошибка при обновлении таблиц: {e}")
     
     def next_round(self) -> int:
         """
@@ -784,7 +743,8 @@ class BunkerGame:
                     player.reveal_attribute(attribute)
             
             # Отправляем финальную таблицу в общий чат
-            status_image = self.generate_status_image()
+            status_image_bytes = self.generate_status_image()
+            status_image = discord.File(status_image_bytes, filename='status.png')
             await channel.send("📊 Финальная таблица всех игроков:", file=status_image)
             
             # Если есть победитель, отправляем уведомление о победе

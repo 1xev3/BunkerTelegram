@@ -42,10 +42,10 @@ class AIClient:
 class G4FClient(AIClient):
     """Client for working with g4f."""
     
-    def __init__(self, model: str, provider: Any, image_model: str, image_provider: Any):
+    def __init__(self, model: str, provider: Any, image_model: str, image_provider: Any, proxies: str = None):
         super().__init__(model, provider, image_model, image_provider)
         from g4f.client import AsyncClient
-        self.client = AsyncClient(provider=provider)
+        self.client = AsyncClient(provider=provider, proxies=proxies)
         self.image_client = AsyncClient(provider=image_provider)
     
     async def generate_message(self, messages: List[Dict[str, str]]) -> str:
