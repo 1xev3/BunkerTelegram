@@ -1,3 +1,5 @@
+import random
+import time
 import discord
 from discord.ext import commands
 import os
@@ -36,6 +38,7 @@ active_games: Dict[int, BunkerGame] = {}  # Словарь для хранени
 
 @bot.event
 async def on_ready():
+    random.seed(time.time())
     """Обработчик события готовности бота"""
     logger.info(f'Бот {bot.user} запущен и готов к работе!')
     try:
@@ -78,14 +81,16 @@ async def start_game(interaction: discord.Interaction):
         return
     
     # Отправляем сообщение о начале генерации бункера
-    await interaction.response.send_message("🔄 Генерирую бункер...")
+    await interaction.response.defer()
+    msg = await interaction.followup.send("🔄 Генерация бункера...")
     
     try:
         # Создание новой игры
         game = BunkerGame(ai_client, interaction.user.id, channel.id)
         
         # Генерация бункера до начала игры
-        await game.generate_bunker()
+        async for status_msg in game.generate_bunker():
+            await msg.edit(content=f"{msg.content}\n-# {status_msg}")
         
         # Сохраняем игру в активных
         active_games[channel.id] = game
@@ -288,13 +293,13 @@ class AdminControlView(discord.ui.View):
             # Обновление контроллов администратора
             await self._update_admin_controls(interaction)
             
-            await interaction.followup.send("Игра успешно запущена!", ephemeral=True)
+            await channel.send("Игра успешно запущена!")
             logger.info(f"Игра запущена в канале {self.game.channel_id}")
         except Exception as e:
             logger.error(f"Ошибка при запуске игры: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка при запуске игры: {e}", ephemeral=True)
     
-    @discord.ui.button(label="Начать голосование", style=discord.ButtonStyle.danger, custom_id="exile_player", row=1)
+    @discord.ui.button(label="Начать голосование", style=discord.ButtonStyle.blurple, custom_id="exile_player", row=1)
     async def exile_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Обработчик нажатия кнопки изгнания участника"""
         try:
@@ -375,7 +380,7 @@ class AdminControlView(discord.ui.View):
             logger.error(f"Ошибка при начале голосования: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
     
-    @discord.ui.button(label="Закончить игру", style=discord.ButtonStyle.secondary, custom_id="end_game", row=1)
+    @discord.ui.button(label="Закончить игру", style=discord.ButtonStyle.red, custom_id="end_game", row=1)
     async def end_game_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Обработчик нажатия кнопки завершения игры"""
         try:
@@ -403,34 +408,6 @@ class AdminControlView(discord.ui.View):
         except Exception as e:
             logger.error(f"Ошибка при завершении игры: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
-    
-    # @discord.ui.button(label="Анализ выживания", style=discord.ButtonStyle.primary, custom_id="analyze_survival", row=2)
-    # async def analyze_survival_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-    #     """Обработчик нажатия кнопки анализа выживания"""
-    #     try:
-    #         # Отложенный ответ
-    #         await interaction.response.defer(ephemeral=True)
-            
-    #         # Проверка, запущена ли игра
-    #         if self.game.status != "running":
-    #             await interaction.followup.send("Игра еще не запущена или уже завершена!", ephemeral=True)
-    #             return
-            
-    #         await interaction.followup.send("🧠 Запускаю анализ выживания в бункере...", ephemeral=True)
-            
-    #         # Уведомление в канал
-    #         channel = bot.get_channel(self.game.channel_id)
-    #         if channel:
-    #             await channel.send("🧠 Администратор запустил анализ шансов выживания группы в бункере...")
-            
-    #         # Запуск анализа выживания
-    #         await self.game.analyze_bunker_survival(bot)
-            
-    #         await interaction.followup.send("Анализ выживания успешно выполнен!", ephemeral=True)
-    #         logger.info(f"Выполнен анализ выживания для игры в канале {self.game.channel_id}")
-    #     except Exception as e:
-    #         logger.error(f"Ошибка при анализе выживания: {e}", exc_info=True)
-    #         await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)
     
     async def _update_admin_controls(self, interaction: discord.Interaction) -> None:
         """
@@ -521,9 +498,11 @@ class AdminControlView(discord.ui.View):
             status_image = self.game.generate_status_image()
             if status_image:
                 dm_channel = await user.create_dm()
+                view = PlayerActionView(self.game, player)
                 message = await dm_channel.send(
                     content="**📊 Статус игроков**",
-                    file=status_image
+                    file=status_image,
+                    view=view
                 )
                 player.status_message_id = message.id
         except Exception as e:
@@ -743,7 +722,7 @@ class PlayerVoteSelect(discord.ui.Select):
                         logger.error(f"Ошибка при отправке результатов игроку {player.name}: {e}", exc_info=True)
                 
                 # Обновляем таблицы статусов
-                await self.game.update_all_player_tables(bot)
+                await self.game.update_all_player_tables(bot, PlayerActionView)
                 
                 # Проверяем, остался ли только один игрок
                 active_players = self.game.get_active_players()
@@ -868,7 +847,7 @@ class AdminVoteControlView(discord.ui.View):
                 await channel.send(embed=result_embed)
                 
                 # Обновляем таблицы статусов
-                await self.game.update_all_player_tables(bot)
+                await self.game.update_all_player_tables(bot, PlayerActionView)
                 
                 # Проверяем, остался ли только один игрок
                 active_players = self.game.get_active_players()
@@ -926,7 +905,10 @@ class PlayerActionView(discord.ui.View):
         ]
         
         for label, attr in characteristics:
-            self.add_item(RevealButton(label, attr))
+            btn = RevealButton(label, attr)
+            if self.player.get_revealed_attribute(attr):
+                btn.disabled = True
+            self.add_item(btn)
         
         # Кнопка для специальной возможности
         # self.add_item(SpecialAbilityButton(self.game, self.player))
@@ -989,7 +971,7 @@ class RevealAllButton(discord.ui.Button):
             
             if revealed_count > 0:
                 # Обновление у всех игроков
-                await game.update_all_player_tables(bot)
+                await self.game.update_all_player_tables(bot, PlayerActionView)
                 
                 # Уведомление в канале
                 channel = bot.get_channel(game.channel_id)
@@ -999,7 +981,10 @@ class RevealAllButton(discord.ui.Button):
                 for item in self.view.children:
                     if isinstance(item, (RevealButton, RevealAllButton)):
                         item.disabled = True
-                await interaction.message.edit(view=self.view)
+                try:
+                    await interaction.message.edit(view=self.view)
+                except Exception as e:
+                    logger.error(f"Ошибка при обновлении кнопок раскрытия: {e}")
                 
                 logger.info(f"Игрок {player.name} раскрыл все характеристики")
             else:
@@ -1084,6 +1069,20 @@ class RevealButton(discord.ui.Button):
             custom_id=f"reveal_{attribute}"
         )
         self.attribute = attribute
+
+    async def _deactivate(self, interaction: discord.Interaction):
+        self.disabled = True
+        if not interaction:
+            return
+        
+        try:
+            if interaction.message:
+                await interaction.message.edit(view=self.view)
+        except discord.NotFound:
+            logger.warning(f"Сообщение для обновления кнопки не найдено")
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении кнопки: {e}")
+        
     
     async def callback(self, interaction: discord.Interaction):
         """Обработчик нажатия на кнопку раскрытия характеристики"""
@@ -1111,7 +1110,7 @@ class RevealButton(discord.ui.Button):
             # Раскрытие характеристики
             if player.reveal_attribute(self.attribute):
                 # Обновление у всех игроков
-                await game.update_all_player_tables(bot)
+                await game.update_all_player_tables(bot, PlayerActionView)
                 
                 # Уведомление в канале
                 channel = bot.get_channel(game.channel_id)
@@ -1119,11 +1118,12 @@ class RevealButton(discord.ui.Button):
                 await channel.send(f"**{player.name}** раскрыл характеристику: **{attribute_name}**")
                 
                 # Деактивация кнопки
-                self.disabled = True
-                await interaction.message.edit(view=self.view)
+                await self._deactivate(interaction)
+                    
                 logger.info(f"Игрок {player.name} раскрыл характеристику: {attribute_name}")
             else:
                 await interaction.followup.send("Эта характеристика уже раскрыта!", ephemeral=True)
+                await self._deactivate(interaction)
         except Exception as e:
             logger.error(f"Ошибка при раскрытии характеристики: {e}", exc_info=True)
             await interaction.followup.send(f"Произошла ошибка: {e}", ephemeral=True)

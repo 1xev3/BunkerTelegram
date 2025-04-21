@@ -226,7 +226,7 @@ class Bunker:
         self.items = []
         self.image = None  # Сохраняем PIL Image вместо URL
     
-    async def generate(self) -> None:
+    async def generate(self):
         """Генерация случайного бункера"""
         self.theme = random.choice(GameData.BUNKER_THEMES)
         self.size = random.choice(GameData.BUNKER_SIZES)
@@ -236,6 +236,7 @@ class Bunker:
         self.items = random.sample(GameData.BUNKER_ITEMS, k=random.randint(1, GameData.BUNKER_ITEMS_COUNT_MAX))
         items_str = ", ".join(self.items)
 
+        yield "Генерирую катаклизм..."
         self.disaster_info = await self.ai_client.generate_message([
             {"role": "system", "content": "You are a helpful assistant that generates bunker disaster descriptions for a bunker game. Always respond in User language."},
             {"role": "user", "content": f"""Сгенерируй случайный смертельный катаклизм для игры в\
@@ -245,6 +246,7 @@ class Bunker:
 В ответе оставь только само описание, не пиши ничего от своего имени. 
 В ответе укажи название катаклизма, его описание и с чём предстоит столкнуться вне бункера."""}])
         
+        yield "Генерирую описание бункера..."
         self.bunker_info = await self.ai_client.generate_message([
             {"role": "system", "content": "You are description generator for a bunker game. Always respond in User language."},
             {"role": "user", "content": f"""Сгенерируй краткое описание бункера по его характеристикам. Придумай какие комнаты в нём есть (в зависимости от размера и предметов в нём).
@@ -257,6 +259,7 @@ class Bunker:
 
         # Генерация изображения бункера
         if GameData.GENERATE_IMAGE:
+            yield "Генерирую изображение бункера..."
             try:
                 self.image_prompt = await self.ai_client.generate_message([
                 {"role": "system", "content": "You are Stable Diffusion prompt generator. Always respond in English"},
@@ -360,8 +363,8 @@ class ImageGenerator:
             discord.File: Файл с изображением таблицы статусов
         """
         try:
-            # Фильтруем только активных игроков
-            active_players = [p for p in players if p.is_active]
+            # Используем всех игроков вместо только активных
+            all_players = players
             
             # Определяем шрифты и цвета
             font_path = os.path.join(os.path.dirname(__file__), 'fonts/arial.ttf')
@@ -411,7 +414,7 @@ class ImageGenerator:
             player_data_rows = []
             column_widths = min_column_widths.copy()
             
-            for i, player in enumerate(active_players):
+            for i, player in enumerate(all_players):
                 # Получаем данные игрока
                 player_data = [
                     f"[{i+1}] {player.name}",
@@ -426,7 +429,7 @@ class ImageGenerator:
                     player.get_revealed_attribute("backpack") or "?",
                     player.get_revealed_attribute("additional") or "?"
                 ]
-                player_data_rows.append(player_data)
+                player_data_rows.append((player_data, player.is_active))
                 
                 # Обновляем ширину колонок на основе содержимого ячеек
                 for i, data in enumerate(player_data):
@@ -445,7 +448,7 @@ class ImageGenerator:
             # Рассчитываем высоту для каждого ряда
             row_heights = []
             
-            for player_data in player_data_rows:
+            for player_data, is_active in player_data_rows:
                 max_height = min_cell_height
                 for i, data in enumerate(player_data):
                     # Используем установленную ширину колонки для переноса текста
@@ -491,7 +494,7 @@ class ImageGenerator:
             # Рисуем данные игроков
             current_y = padding + header_height
             
-            for row, (player_data, row_height) in enumerate(zip(player_data_rows, row_heights)):
+            for row, ((player_data, is_active), row_height) in enumerate(zip(player_data_rows, row_heights)):
                 x = padding
                 
                 for i, data in enumerate(player_data):
@@ -512,9 +515,12 @@ class ImageGenerator:
                     total_text_height = len(lines) * line_height
                     y_offset = (row_height - total_text_height) / 2
                     
+                    # Определяем цвет текста в зависимости от активности игрока
+                    text_color = (255, 0, 0) if not is_active else (0, 0, 0)
+                    
                     for j, line in enumerate(lines):
                         line_y = current_y + y_offset + j * line_height
-                        draw.text((x + 5, line_y), line, font=cell_font, fill=(0, 0, 0))
+                        draw.text((x + 5, line_y), line, font=cell_font, fill=text_color)
                     
                     x += column_widths[i]
                 
@@ -598,9 +604,12 @@ class BunkerGame:
                 return True
         return False
     
-    async def generate_bunker(self) -> None:
+    async def generate_bunker(self):
         """Генерация бункера"""
-        await self.bunker.generate()
+
+        async for status_msg in self.bunker.generate():
+            logging.info(status_msg)
+            yield status_msg
     
     async def generate_player_cards(self) -> None:
         """Генерация карточек для всех игроков"""
@@ -616,7 +625,7 @@ class BunkerGame:
         """
         return ImageGenerator.generate_status_image(self.players)
     
-    async def update_all_player_tables(self, bot) -> None:
+    async def update_all_player_tables(self, bot, player_action_view: discord.ui.View = None) -> None:
         """
         Обновление таблиц статусов для всех игроков
         
@@ -646,8 +655,9 @@ class BunkerGame:
                             
                             # Отправляем новое сообщение со статусом
                             new_message = await dm_channel.send(
-                                content="**📊 Статус игроков (обновлено)**",
-                                file=status_image
+                                content="**📊 Статус игроков**",
+                                file=status_image,
+                                view=player_action_view(self, player)
                             )
                             
                             # Обновляем ID сообщения
@@ -659,14 +669,16 @@ class BunkerGame:
                             # Если не можем найти старое сообщение, просто отправляем новое
                             new_message = await dm_channel.send(
                                 content="**📊 Статус игроков**",
-                                file=status_image
+                                file=status_image,
+                                view=player_action_view(self, player)
                             )
                             player.status_message_id = new_message.id
                     else:
                         # Если сообщения еще нет, отправляем новое
                         new_message = await dm_channel.send(
                             content="**📊 Статус игроков**",
-                            file=status_image
+                            file=status_image,
+                            view=player_action_view(self, player)
                         )
                         player.status_message_id = new_message.id
                 except Exception as e:
@@ -765,6 +777,16 @@ class BunkerGame:
                 logger.error(f"Ошибка: канал {self.channel_id} не найден при завершении игры")
                 return
             
+            # Открываем все атрибуты у всех игроков
+            for player in self.players:
+                for attribute in ["gender", "body", "trait", "profession", "health", 
+                                "hobby", "phobia", "inventory", "backpack", "additional"]:
+                    player.reveal_attribute(attribute)
+            
+            # Отправляем финальную таблицу в общий чат
+            status_image = self.generate_status_image()
+            await channel.send("📊 Финальная таблица всех игроков:", file=status_image)
+            
             # Если есть победитель, отправляем уведомление о победе
             if winner:
                 winner_embed = discord.Embed(
@@ -819,7 +841,7 @@ class BunkerGame:
             
             # Запускаем анализ выживания в бункере с оставшимися игроками
             if self.get_active_players():
-                await channel.send("🧠 А теперь посмотрим, как нейросеть оценивает шансы этой группы на выживание...")
+                # await channel.send("🧠 А теперь посмотрим, как нейросеть оценивает шансы этой группы на выживание...")
                 await self.analyze_bunker_survival(bot)
         except Exception as e:
             logger.error(f"Ошибка при завершении игры: {e}")
@@ -868,13 +890,9 @@ class BunkerGame:
 {survivors_text}
 
 Оцени по следующим критериям:
-1. Вероятность выживания группы (в процентах)
-2. Основные преимущества данной группы
-3. Основные недостатки и риски
-4. Какие конфликты могут возникнуть между обитателями бункера
-5. Общий вердикт: выживут или нет
-
-Дай подробный анализ.
+1. Какие конфликты могут возникнуть между обитателями бункера
+2. Сильные и слабые стороны группы и предметов
+3. Посчитай вероятность выживания группы в процентах
 """
             
             # Отправляем запрос нейросети
