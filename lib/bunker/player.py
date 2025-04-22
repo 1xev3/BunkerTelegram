@@ -1,7 +1,7 @@
 
 
 import random
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, AsyncGenerator
 from textwrap import dedent
 
 import numpy as np
@@ -60,10 +60,11 @@ class Player:
         # Активен ли игрок (не выбыл из игры)
         self.is_active = True
     
-    async def generate_character(self, ai_client: G4FClient) -> None:
+    async def generate_character(self, ai_client: G4FClient) -> AsyncGenerator[str, None]:
         """Генерация случайных характеристик персонажа"""
 
         # Генерация пола
+        yield "Генерация основной информации..."
         gender = weighed_random(GameConfig.GENDERS)
         gender_affix = weighed_random(GameConfig.GENDER_AFFIXES)
         years_old = weighed_random(GameConfig.AGES)
@@ -135,6 +136,7 @@ class Player:
 
         self.description = ""
         if GameConfig.GENERATE_CHARACTER_DESC:
+            yield "Генерация внешнего вида персонажа..."
             self.description = await ai_client.generate_message([
                 {"role": "system", "content": "You are a helpful assistant that generates character descriptions for a bunker game. Always respond in User language."},
                 {"role": "user", "content": dedent(f"""Сгенерируй краткое внешнее описание для персонажа. 

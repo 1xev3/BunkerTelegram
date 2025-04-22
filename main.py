@@ -94,7 +94,8 @@ async def start_game(interaction: discord.Interaction):
         
         # Генерация бункера до начала игры
         async for status_msg in game.generate_bunker():
-            await msg.edit(content=f"{msg.content}\n\n-# {status_msg}")
+            msg = await msg.edit(content=f"{msg.content}\n-# {status_msg}")
+        await msg.edit(content=f"## Генерация бункера завершена")
         
         # Сохраняем игру в активных
         active_games[channel.id] = game
@@ -255,10 +256,10 @@ class AdminControlView(discord.ui.View):
             self.game.status = "running"
             
             # Генерация персонажей (бункер уже сгенерирован)
-            await self.game.generate_player_cards()
-            
-            # Уведомление в канале
-            await channel.send("Игра началась! Всем игрокам отправлена информация в личных сообщениях.")
+            msg = await channel.send("Генерация персонажей...")
+            async for status_msg in self.game.generate_player_cards():
+                await msg.edit(content=f"{msg.content}\n\n-# {status_msg}")
+            await msg.edit(content=f"## Генерация персонажей завершена.\nВсем игрокам отправлена информация в личных сообщениях.")
             
             # Отправка информации игрокам
             await self.send_game_info_to_players()
@@ -537,21 +538,23 @@ class PlayerVoteSelect(discord.ui.Select):
             target_id = int(self.values[0])
             
             # Добавляем голос
-            self.game.add_vote(interaction.user.id, target_id)
+            if not self.game.add_vote(interaction.user.id, target_id):
+                await interaction.response.send_message("Произошла ошибка при учете вашего голоса!", ephemeral=True)
+                return
             
             # Деактивируем селект-меню после голосования
             self.disabled = True
             await interaction.response.edit_message(view=self.view)
             
-            await interaction.followup.send("Вы проголосовали за исключение игрока. Когда все проголосуют, результаты будут объявлены в общем канале.")
+            await interaction.followup.send("Вы проголосовали за исключение игрока. Когда все проголосуют, результаты будут объявлены в общем канале.", ephemeral=True)
             logger.info(f"Игрок {interaction.user.name} проголосовал за исключение игрока с ID {target_id}")
             
-            # Проверяем, все ли проголосовали, и если да, автоматически завершаем голосование
+            # Проверяем, все ли проголосовали
             if len(self.game.voted_players) >= self.game.active_voting_players:
                 # Дополнительная защита от повторного завершения голосования
                 if self.game.votes and self.game.active_voting_players > 0:
                     logger.info(f"Автоматическое завершение голосования - проголосовали все игроки ({len(self.game.voted_players)} из {self.game.active_voting_players})")
-                    # Запускаем завершение голосования через фоновую задачу, чтобы не блокировать текущий запрос
+                    # Запускаем завершение голосования через фоновую задачу
                     bot.loop.create_task(self.finish_voting())
                     # Сбрасываем счетчик, чтобы завершение не вызывалось повторно
                     self.game.active_voting_players = 0
@@ -634,7 +637,7 @@ class PlayerVoteSelect(discord.ui.Select):
                             )
                             await dm_channel.send(embed=player_result_embed)
                     except Exception as e:
-                        logger.error(f"Ошибка при отправке результатов игроку {player.name}: {e}", exc_info=True)
+                        logger.error(f"Ошибка при отправке результатов игроку {player.name}: {e}")
                 
                 # Уведомляем администратора, что нужно провести новое голосование
                 admin = bot.get_user(self.game.admin_id)
@@ -643,7 +646,7 @@ class PlayerVoteSelect(discord.ui.Select):
                         dm_channel = await admin.create_dm()
                         await dm_channel.send("Голосование завершилось без однозначного результата. Вы можете начать новое голосование.")
                     except Exception as e:
-                        logger.error(f"Ошибка при отправке уведомления администратору: {e}", exc_info=True)
+                        logger.error(f"Ошибка при отправке уведомления администратору: {e}")
             else:
                 # У нас есть однозначный результат
                 exile_id = candidates[0]
@@ -694,7 +697,7 @@ class PlayerVoteSelect(discord.ui.Select):
                                 )
                             await dm_channel.send(embed=player_result_embed)
                     except Exception as e:
-                        logger.error(f"Ошибка при отправке результатов игроку {player.name}: {e}", exc_info=True)
+                        logger.error(f"Ошибка при отправке результатов игроку {player.name}: {e}")
                 
                 # Обновление у всех игроков
                 await update_all_player_tables(self.game, bot)
@@ -1232,8 +1235,10 @@ async def update_all_player_tables(game: DiscordBunkerGame, bot) -> None:
         bot: Объект бота Discord
     """
     try:
+        status_image_bytes = game.generate_status_image()
         # Обновляем для каждого активного игрока
         for player in (p for p in game.players if p.is_active):
+            logger.info(f"Обновление таблицы статуса для игрока {player.name}")
             user = bot.get_user(player.id)
             if not user:
                 continue
@@ -1248,8 +1253,7 @@ async def update_all_player_tables(game: DiscordBunkerGame, bot) -> None:
                     color=discord.Color.green()
                 )
 
-                # Нужно каждый раз генерировать discord.File
-                status_image_bytes = game.generate_status_image()
+                status_image_bytes.seek(0)  # Сбрасываем позицию перед созданием файла
                 status_image = discord.File(status_image_bytes, filename='status.png')
                 
                 message_content = {

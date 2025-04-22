@@ -1,7 +1,7 @@
 import discord
 import logging
 import re
-from typing import Optional
+from typing import Optional, Dict
 
 from lib.bunker.bunker_game import BunkerGame
 from lib.bunker.game_config import GameConfig
@@ -25,6 +25,9 @@ class DiscordBunkerGame(BunkerGame):
         self.message_id = None
         self.admin_message_id = None
         self.vote_message_id = None
+        self.votes = {}  # Словарь для хранения голосов
+        self.voted_players = set()  # Множество ID игроков, которые уже проголосовали
+        self.active_voting_players = 0  # Количество активных игроков в текущем голосовании
     
     async def end_game(self, bot, winner: Optional[Player] = None, reason: str = "") -> None:
         """
@@ -49,6 +52,7 @@ class DiscordBunkerGame(BunkerGame):
             
             # Send final status table
             status_image_bytes = self.generate_status_image()
+            status_image_bytes.seek(0)  # Сбрасываем позицию перед созданием файла
             status_image = discord.File(status_image_bytes, filename='status.png')
             await channel.send("📊 Финальная таблица всех игроков:", file=status_image)
             
@@ -204,4 +208,57 @@ class DiscordBunkerGame(BunkerGame):
                     description=part,
                     color=discord.Color.blue()
                 )
-                await channel.send(embed=embed) 
+                await channel.send(embed=embed)
+
+    def add_vote(self, voter_id: int, target_id: int) -> bool:
+        """
+        Добавляет голос игрока
+        
+        Args:
+            voter_id: ID игрока, который голосует
+            target_id: ID игрока, за которого голосуют
+            
+        Returns:
+            bool: True если голос успешно добавлен, False в случае ошибки
+        """
+        try:
+            # Проверяем, что оба игрока существуют и активны
+            voter = next((p for p in self.players if p.id == voter_id and p.is_active), None)
+            target = next((p for p in self.players if p.id == target_id and p.is_active), None)
+            
+            if not voter or not target:
+                logger.error(f"Ошибка при добавлении голоса: игроки не найдены (voter: {voter_id}, target: {target_id})")
+                return False
+            
+            # Добавляем голос
+            self.votes[voter_id] = target_id
+            self.voted_players.add(voter_id)
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении голоса: {e}", exc_info=True)
+            return False
+
+    def count_votes(self) -> Dict[int, int]:
+        """
+        Подсчитывает голоса
+        
+        Returns:
+            Dict[int, int]: Словарь с результатами голосования (ID игрока: количество голосов)
+        """
+        try:
+            vote_counts = {}
+            for target_id in self.votes.values():
+                vote_counts[target_id] = vote_counts.get(target_id, 0) + 1
+            return vote_counts
+        except Exception as e:
+            logger.error(f"Ошибка при подсчете голосов: {e}", exc_info=True)
+            return {}
+
+    def reset_votes(self) -> None:
+        """Сбрасывает результаты голосования"""
+        try:
+            self.votes.clear()
+            self.voted_players.clear()
+            self.active_voting_players = len([p for p in self.players if p.is_active])
+        except Exception as e:
+            logger.error(f"Ошибка при сбросе голосов: {e}", exc_info=True) 

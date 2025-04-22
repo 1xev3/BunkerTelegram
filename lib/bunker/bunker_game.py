@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator
 import logging
 from typing import List, Dict, Optional
 
@@ -56,10 +57,12 @@ class BunkerGame:
             logging.info(status_msg)
             yield status_msg
     
-    async def generate_player_cards(self) -> None:
+    async def generate_player_cards(self) -> AsyncGenerator[str, None]:
         """Generate cards for all players"""
         for player in self.players:
-            await player.generate_character(self.ai_client)
+            async for status_msg in player.generate_character(self.ai_client):
+                logging.info(status_msg)
+                yield f"Игрок {player.name}: {status_msg}"
     
     def generate_status_image(self) -> bytes:
         """
