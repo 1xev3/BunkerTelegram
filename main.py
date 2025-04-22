@@ -6,7 +6,8 @@ import os
 from typing import Dict, List
 from dotenv import load_dotenv
 from lib.ai_client import G4FClient
-from lib.bunker.bunker_game import BunkerGame, Player
+from lib.bunker.discord_bunker_game import DiscordBunkerGame
+from lib.bunker.player import Player
 from lib.logging_config import setup_logging
 from io import BytesIO
 
@@ -26,7 +27,6 @@ intents.message_content = True
 intents.members = True
 intents.reactions = True
 
-
 from g4f.Provider import RetryProvider, ImageLabs, Free2GPT
 ai_client = G4FClient(
     model="gemini-1.5-flash", 
@@ -38,7 +38,7 @@ ai_client = G4FClient(
 
 # Инициализация бота
 bot = commands.Bot(command_prefix='/', intents=intents)
-active_games: Dict[int, BunkerGame] = {}  # Словарь для хранения активных игр
+active_games: Dict[int, DiscordBunkerGame] = {}  # Словарь для хранения активных игр
 
 @bot.event
 async def on_ready():
@@ -90,7 +90,7 @@ async def start_game(interaction: discord.Interaction):
     
     try:
         # Создание новой игры
-        game = BunkerGame(ai_client, interaction.user.id, channel.id)
+        game = DiscordBunkerGame(ai_client, interaction.user.id, channel.id)
         
         # Генерация бункера до начала игры
         async for status_msg in game.generate_bunker():
@@ -138,42 +138,11 @@ async def start_game(interaction: discord.Interaction):
         logger.error(f"Ошибка при создании игры: {e}", exc_info=True)
         await interaction.followup.send("Произошла ошибка при создании игры. Попробуйте позже.", ephemeral=True)
 
-# @bot.tree.command(name="analyze", description="Проанализировать шансы выживания текущего состава бункера")
-# async def analyze_survival(interaction: discord.Interaction):
-#     """Команда для анализа шансов выживания группы в бункере"""
-#     channel = interaction.channel
-    
-#     # Проверка на существование активной игры в этом канале
-#     if channel.id not in active_games:
-#         await interaction.response.send_message("В этом канале нет активной игры.", ephemeral=True)
-#         return
-    
-#     game = active_games[channel.id]
-    
-#     # Проверка, что игра запущена
-#     if game.status != "running":
-#         await interaction.response.send_message("Игра должна быть в активном состоянии для проведения анализа.", ephemeral=True)
-#         return
-    
-#     # Проверка, что пользователь является администратором игры
-#     if interaction.user.id != game.admin_id:
-#         await interaction.response.send_message("Только администратор игры может запустить анализ.", ephemeral=True)
-#         return
-    
-#     await interaction.response.send_message("🧠 Запускаю анализ выживания в бункере...", ephemeral=True)
-    
-#     try:
-#         await game.analyze_bunker_survival(bot)
-#         await interaction.followup.send("Анализ успешно выполнен!", ephemeral=True)
-#     except Exception as e:
-#         logger.error(f"Ошибка при выполнении анализа: {e}", exc_info=True)
-#         await interaction.followup.send(f"Произошла ошибка при выполнении анализа: {e}", ephemeral=True)
-
 # Класс для кнопки присоединения к игре
 class JoinGameView(discord.ui.View):
     """Класс представления с кнопкой для присоединения к игре"""
     
-    def __init__(self, game: BunkerGame):
+    def __init__(self, game: DiscordBunkerGame):
         """
         Инициализация представления
         
@@ -232,7 +201,7 @@ class JoinGameView(discord.ui.View):
             logger.error(f"Ошибка при обновлении списка игроков: {e}", exc_info=True)
 
 # Отправка элементов управления администратору
-async def send_admin_controls(admin: discord.User, game: BunkerGame) -> None:
+async def send_admin_controls(admin: discord.User, game: DiscordBunkerGame) -> None:
     """
     Отправляет панель управления игрой администратору
     
@@ -258,7 +227,7 @@ async def send_admin_controls(admin: discord.User, game: BunkerGame) -> None:
 class AdminControlView(discord.ui.View):
     """Класс представления с кнопками для управления игрой администратором"""
     
-    def __init__(self, game: BunkerGame):
+    def __init__(self, game: DiscordBunkerGame):
         """
         Инициализация представления
         
@@ -518,7 +487,7 @@ class AdminControlView(discord.ui.View):
 class VotingView(discord.ui.View):
     """Класс представления для голосования всеми игроками"""
     
-    def __init__(self, game: BunkerGame):
+    def __init__(self, game: DiscordBunkerGame):
         """
         Инициализация представления
         
@@ -532,7 +501,7 @@ class VotingView(discord.ui.View):
 class PlayerVoteSelect(discord.ui.Select):
     """Селект-меню для голосования игроками"""
     
-    def __init__(self, options: List[discord.SelectOption], game: BunkerGame, channel_id: int):
+    def __init__(self, options: List[discord.SelectOption], game: DiscordBunkerGame, channel_id: int):
         """
         Инициализация селект-меню
         
@@ -744,7 +713,7 @@ class PlayerVoteSelect(discord.ui.Select):
 class AdminVoteControlView(discord.ui.View):
     """Класс представления с кнопками для управления голосованием администратором"""
     
-    def __init__(self, game: BunkerGame):
+    def __init__(self, game: DiscordBunkerGame):
         """
         Инициализация представления
         
@@ -881,7 +850,7 @@ class AdminVoteControlView(discord.ui.View):
 class PlayerActionView(discord.ui.View):
     """Класс представления с кнопками действий игрока"""
     
-    def __init__(self, game: BunkerGame, player: Player):
+    def __init__(self, game: DiscordBunkerGame, player: Player):
         """
         Инициализация представления для действий игрока
         
@@ -926,7 +895,7 @@ class PlayerActionView(discord.ui.View):
 class RevealAllButton(discord.ui.Button):
     """Кнопка для раскрытия всех характеристик игрока"""
     
-    def __init__(self, game: BunkerGame, player: Player):
+    def __init__(self, game: DiscordBunkerGame, player: Player):
         """
         Инициализация кнопки
         
@@ -1003,7 +972,7 @@ class RevealAllButton(discord.ui.Button):
 class SpecialAbilityButton(discord.ui.Button):
     """Кнопка для использования специальной способности игрока"""
     
-    def __init__(self, game: BunkerGame, player: Player):
+    def __init__(self, game: DiscordBunkerGame, player: Player):
         """
         Инициализация кнопки
         
@@ -1061,7 +1030,7 @@ class SpecialAbilityButton(discord.ui.Button):
 class RevealButton(discord.ui.Button):
     """Кнопка для раскрытия характеристики игрока"""
     
-    def __init__(self, label: str, attribute: str, game: BunkerGame):
+    def __init__(self, label: str, attribute: str, game: DiscordBunkerGame):
         """
         Инициализация кнопки
         
@@ -1140,7 +1109,7 @@ class RevealButton(discord.ui.Button):
 class GenerateImageButton(discord.ui.Button):
     """Кнопка для генерации изображения персонажа"""
     
-    def __init__(self, game: BunkerGame, player: Player):
+    def __init__(self, game: DiscordBunkerGame, player: Player):
         """
         Инициализация кнопки
         
@@ -1254,7 +1223,7 @@ Describe old or young, male or female, etc.
             # Обновляем состояние кнопки на ошибку
             await self.update_button_state(interaction, success=False)
 
-async def update_all_player_tables(game: BunkerGame, bot) -> None:
+async def update_all_player_tables(game: DiscordBunkerGame, bot) -> None:
     """
     Обновление таблиц статусов для всех активных игроков
     

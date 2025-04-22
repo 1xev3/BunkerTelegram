@@ -5,6 +5,7 @@ class GameConfig:
     GENERATE_DISASTER       = False
     GENERATE_BUNKER_DESC    = False
     GENERATE_CHARACTER_DESC = False
+    GENERATE_ANALYSIS       = False
     
     # Data for generating player cards
     GENDERS = [
