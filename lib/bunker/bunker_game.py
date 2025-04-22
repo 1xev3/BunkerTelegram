@@ -51,9 +51,9 @@ class BunkerGame:
                 return True
         return False
     
-    async def generate_bunker(self):
+    async def generate_bunker(self, theme: str = None):
         """Generate bunker"""
-        async for status_msg in self.bunker.generate():
+        async for status_msg in self.bunker.generate(theme):
             logging.info(status_msg)
             yield status_msg
     

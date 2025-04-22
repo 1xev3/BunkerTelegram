@@ -75,7 +75,7 @@ async def on_app_command_error(interaction: discord.Interaction, error):
         await interaction.followup.send(f"Произошла ошибка: {error}", ephemeral=True)
 
 @bot.tree.command(name="start", description="Начать новую игру Бункер")
-async def start_game(interaction: discord.Interaction):
+async def start_game(interaction: discord.Interaction, theme: str = None):
     """Команда для начала новой игры Бункер"""
     channel = interaction.channel
     
@@ -93,7 +93,7 @@ async def start_game(interaction: discord.Interaction):
         game = DiscordBunkerGame(ai_client, interaction.user.id, channel.id)
         
         # Генерация бункера до начала игры
-        async for status_msg in game.generate_bunker():
+        async for status_msg in game.generate_bunker(theme = theme):
             msg = await msg.edit(content=f"{msg.content}\n-# {status_msg}")
         await msg.edit(content=f"## Генерация бункера завершена")
         

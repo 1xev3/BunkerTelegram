@@ -21,9 +21,12 @@ class Bunker:
         self.items = []
         self.image = None  # Сохраняем PIL Image вместо URL
     
-    async def generate(self):
+    async def generate(self, theme: str = None):
         """Генерация случайного бункера"""
-        self.theme = random.choice(GameConfig.BUNKER_THEMES)
+        if theme:
+            self.theme = theme
+        else:
+            self.theme = random.choice(GameConfig.BUNKER_THEMES)
         self.size = random.choice(GameConfig.BUNKER_SIZES)
         self.duration = random.choice(GameConfig.BUNKER_DURATIONS)
         self.food = random.choice(GameConfig.FOOD_SUPPLIES)

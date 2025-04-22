@@ -1,11 +1,11 @@
 class GameConfig:
     """Класс для хранения данных игры"""
 
-    GENERATE_IMAGE          = False
-    GENERATE_DISASTER       = False
-    GENERATE_BUNKER_DESC    = False
-    GENERATE_CHARACTER_DESC = False
-    GENERATE_ANALYSIS       = False
+    GENERATE_IMAGE          = True
+    GENERATE_DISASTER       = True
+    GENERATE_BUNKER_DESC    = True
+    GENERATE_CHARACTER_DESC = True
+    GENERATE_ANALYSIS       = True
     
     # Data for generating player cards
     GENDERS = [
