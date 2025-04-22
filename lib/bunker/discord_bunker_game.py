@@ -227,7 +227,7 @@ class DiscordBunkerGame(BunkerGame):
             target = next((p for p in self.players if p.id == target_id and p.is_active), None)
             
             if not voter or not target:
-                logger.error(f"Ошибка при добавлении голоса: игроки не найдены (voter: {voter_id}, target: {target_id})")
+                logging.error(f"Ошибка при добавлении голоса: игроки не найдены (voter: {voter_id}, target: {target_id})")
                 return False
             
             # Добавляем голос
@@ -235,7 +235,7 @@ class DiscordBunkerGame(BunkerGame):
             self.voted_players.add(voter_id)
             return True
         except Exception as e:
-            logger.error(f"Ошибка при добавлении голоса: {e}", exc_info=True)
+            logging.error(f"Ошибка при добавлении голоса: {e}")
             return False
 
     def count_votes(self) -> Dict[int, int]:
@@ -251,7 +251,7 @@ class DiscordBunkerGame(BunkerGame):
                 vote_counts[target_id] = vote_counts.get(target_id, 0) + 1
             return vote_counts
         except Exception as e:
-            logger.error(f"Ошибка при подсчете голосов: {e}", exc_info=True)
+            logging.error(f"Ошибка при подсчете голосов: {e}")
             return {}
 
     def reset_votes(self) -> None:
@@ -261,4 +261,4 @@ class DiscordBunkerGame(BunkerGame):
             self.voted_players.clear()
             self.active_voting_players = len([p for p in self.players if p.is_active])
         except Exception as e:
-            logger.error(f"Ошибка при сбросе голосов: {e}", exc_info=True) 
+            logging.error(f"Ошибка при сбросе голосов: {e}") 
