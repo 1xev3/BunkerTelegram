@@ -6,7 +6,7 @@ import os
 from typing import Dict, List
 from dotenv import load_dotenv
 from lib.ai_client import G4FClient
-from lib.bunker_game import BunkerGame, Player
+from lib.bunker.bunker_game import BunkerGame, Player
 from lib.logging_config import setup_logging
 from io import BytesIO
 

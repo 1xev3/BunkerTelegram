@@ -1,7 +1,9 @@
 class GameData:
     """Класс для хранения данных игры"""
 
-    GENERATE_IMAGE = False
+    GENERATE_IMAGE          = False
+    GENERATE_DISASTER       = False
+    GENERATE_BUNKER_DESC    = False
     
     # Data for generating player cards
     GENDERS = [
