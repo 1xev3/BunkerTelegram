@@ -142,7 +142,7 @@ class ImageGenerator:
                     column_widths[i] = min(max(column_widths[i], width + 30), max_column_widths[i])
             
             # Рассчитываем размеры изображения
-            padding = 7  # Увеличили отступы
+            padding = 0  # Увеличили отступы
             header_height = 40  # Увеличили высоту заголовка
             min_cell_height = 40  # Увеличили минимальную высоту ячейки
             

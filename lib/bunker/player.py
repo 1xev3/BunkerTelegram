@@ -115,7 +115,8 @@ class Player:
         hobby_level = weighed_random(GameConfig.SKILL_LEVELS)
         self.hobby = f"{hobby} ({hobby_level})"
         
-        self.phobia = random.choice(GameConfig.PHOBIAS)
+        phobia = random.choice(GameConfig.PHOBIAS)
+        self.phobia = f"Страх {phobia}"
         self.inventory = random.choice(GameConfig.INVENTORY)
         
         # Генерация от 1 до 3 предметов для рюкзака
