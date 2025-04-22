@@ -2,11 +2,12 @@
 
 import random
 from typing import Any, List, Optional, Tuple
+from textwrap import dedent
 
 import numpy as np
 
 from lib.ai_client import G4FClient
-from lib.bunker.game_data import GameData
+from lib.bunker.game_config import GameConfig
 
 def weighed_random(tbl: List[Tuple[Any, float]]) -> Any:
     items = [x[0] for x in tbl]  # Элементы
@@ -63,14 +64,14 @@ class Player:
         """Генерация случайных характеристик персонажа"""
 
         # Генерация пола
-        gender = weighed_random(GameData.GENDERS)
-        gender_affix = weighed_random(GameData.GENDER_AFFIXES)
-        years_old = weighed_random(GameData.AGES)
+        gender = weighed_random(GameConfig.GENDERS)
+        gender_affix = weighed_random(GameConfig.GENDER_AFFIXES)
+        years_old = weighed_random(GameConfig.AGES)
         years_old = random.randint(years_old[0], years_old[1])
         self.gender = f"{gender} {gender_affix} ({years_old} лет)"
 
         # Генерация телосложения
-        body = weighed_random(GameData.BODY_TYPES)
+        body = weighed_random(GameConfig.BODY_TYPES)
         
         # Генерация роста в зависимости от возраста
         if years_old < 18:
@@ -93,32 +94,32 @@ class Player:
         # Ограничение роста разумными пределами
         body_height = max(150, min(210, body_height))
         self.body = f"{body} ({body_height} см)"
-        self.trait = random.choice(GameData.TRAITS)
+        self.trait = random.choice(GameConfig.TRAITS)
         
         # Генерация профессии с уровнем
-        profession = random.choice(GameData.PROFESSIONS)
-        profession_level = weighed_random(GameData.SKILL_LEVELS)
+        profession = random.choice(GameConfig.PROFESSIONS)
+        profession_level = weighed_random(GameConfig.SKILL_LEVELS)
         self.profession = f"{profession} ({profession_level})"
         
         # Генерация здоровья
-        health = weighed_random(GameData.HEALTH_STATES)
-        health_stage = weighed_random(GameData.HEALTH_STAGES)
+        health = weighed_random(GameConfig.HEALTH_STATES)
+        health_stage = weighed_random(GameConfig.HEALTH_STAGES)
         if health != "Здоров":
             self.health = f"{health} ({health_stage})"
         else:
             self.health = health
         
         # Генерация хобби с уровнем
-        hobby = random.choice(GameData.HOBBIES)
-        hobby_level = weighed_random(GameData.SKILL_LEVELS)
+        hobby = random.choice(GameConfig.HOBBIES)
+        hobby_level = weighed_random(GameConfig.SKILL_LEVELS)
         self.hobby = f"{hobby} ({hobby_level})"
         
-        self.phobia = random.choice(GameData.PHOBIAS)
-        self.inventory = random.choice(GameData.INVENTORY)
+        self.phobia = random.choice(GameConfig.PHOBIAS)
+        self.inventory = random.choice(GameConfig.INVENTORY)
         
         # Генерация от 1 до 3 предметов для рюкзака
-        backpack_items_count = random.randint(1, GameData.BACKPACK_ITEMS_COUNT_MAX)
-        backpack_items = random.sample(GameData.BACKPACK_ITEMS, k=backpack_items_count)
+        backpack_items_count = random.randint(1, GameConfig.BACKPACK_ITEMS_COUNT_MAX)
+        backpack_items = random.sample(GameConfig.BACKPACK_ITEMS, k=backpack_items_count)
         backpack_items_values = []
         for item in backpack_items:
             if isinstance(item, tuple):
@@ -130,22 +131,18 @@ class Player:
                 backpack_items_values.append(item)
         self.backpack = ", ".join(backpack_items_values)
         
-        self.additional = random.choice(GameData.ADDITIONAL_INFO)
-
-        # Генерация специальной возможности
-        if random.random() < GameData.SPECIAL_ABILITIES_CHANCE:
-            self.special_ability = random.choice(GameData.SPECIAL_ABILITIES)
-        else:
-            self.special_ability = ""
+        self.additional = random.choice(GameConfig.ADDITIONAL_INFO)
 
         self.description = ""
-        self.description = await ai_client.generate_message([
-            {"role": "system", "content": "You are a helpful assistant that generates character descriptions for a bunker game. Always respond in User language."},
-            {"role": "user", "content": f"""Сгенерируй краткое внешнее описание для персонажа. 
-В ответе оставь только само описание, не пиши ничего от своего имени.
-Придумай для персонажа: Имя, цвет глаз, цвет волос, стиль причёски, цвет кожи, стиль одежды, цвета одежды
-Вот досье персонажа, которого нужно сгенерировать (исходя из него, придумывай): {self.get_character_card()}"""}])
-    
+        if GameConfig.GENERATE_CHARACTER_DESC:
+            self.description = await ai_client.generate_message([
+                {"role": "system", "content": "You are a helpful assistant that generates character descriptions for a bunker game. Always respond in User language."},
+                {"role": "user", "content": dedent(f"""Сгенерируй краткое внешнее описание для персонажа. 
+                    В ответе оставь только само описание, не пиши ничего от своего имени.
+                    Придумай для персонажа: Имя, цвет глаз, цвет волос, стиль причёски, цвет кожи, стиль одежды, цвета одежды
+                    Вот досье персонажа, которого нужно сгенерировать (исходя из него, придумывай): {self.get_character_card()}
+                """)}])
+                
     def get_formatted_attribute(self, attribute: str) -> str:
         """
         Получение форматированной характеристики персонажа
@@ -179,7 +176,6 @@ class Player:
             f"> **Крупный инвентарь**: {self.get_formatted_attribute('inventory')}\n"
             f"> **Рюкзак**: {self.get_formatted_attribute('backpack')}\n"
             f"> **Дополнительное сведение**: {self.get_formatted_attribute('additional')}\n"
-            f"> **Спец. возможность**: {self.get_formatted_attribute('special_ability')}"
         )
     
     def reveal_attribute(self, attribute: str) -> bool:

@@ -4,7 +4,7 @@ from typing import Optional
 import discord
 
 from lib.ai_client import G4FClient
-from lib.bunker.game_data import GameData
+from lib.bunker.game_config import GameConfig
 
 from textwrap import dedent
 
@@ -23,15 +23,16 @@ class Bunker:
     
     async def generate(self):
         """Генерация случайного бункера"""
-        self.theme = random.choice(GameData.BUNKER_THEMES)
-        self.size = random.choice(GameData.BUNKER_SIZES)
-        self.duration = random.choice(GameData.BUNKER_DURATIONS)
-        self.food = random.choice(GameData.FOOD_SUPPLIES)
+        self.theme = random.choice(GameConfig.BUNKER_THEMES)
+        self.size = random.choice(GameConfig.BUNKER_SIZES)
+        self.duration = random.choice(GameConfig.BUNKER_DURATIONS)
+        self.food = random.choice(GameConfig.FOOD_SUPPLIES)
         # Выбираем от 2 до 5 случайных предметов
-        self.items = random.sample(GameData.BUNKER_ITEMS, k=random.randint(1, GameData.BUNKER_ITEMS_COUNT_MAX))
+        self.items = random.sample(GameConfig.BUNKER_ITEMS, k=random.randint(1, GameConfig.BUNKER_ITEMS_COUNT_MAX))
         items_str = ", ".join(self.items)
 
-        if GameData.GENERATE_DISASTER:  
+        self.disaster_info = f"Тема: {self.theme}"
+        if GameConfig.GENERATE_DISASTER:  
             yield "Генерирую катаклизм..."
             self.disaster_info = await self.ai_client.generate_message([
                 {"role": "system", "content": "You are a helpful assistant that generates bunker disaster descriptions for a bunker game. Always respond in User language."},
@@ -43,19 +44,21 @@ class Bunker:
                     В ответе укажи название катаклизма, его описание и с чём предстоит столкнуться вне бункера.
                 """)}])
         
-        yield "Генерирую описание бункера..."
-        self.bunker_info = await self.ai_client.generate_message([
-            {"role": "system", "content": "You are description generator for a bunker game. Always respond in User language."},
-            {"role": "user", "content": dedent(f"""Сгенерируй краткое описание бункера по его характеристикам. Придумай какие комнаты в нём есть (в зависимости от размера и предметов в нём).
-                В ответе оставь только само описание, не пиши ничего от своего имени. 
-                Вот характеристики бункера: 
-                Размер: {self.size}
-                Еда: {self.food}
-                Предметы: {items_str}
-            """)}])
+        self.bunker_info = ""
+        if GameConfig.GENERATE_BUNKER_DESC:
+            yield "Генерирую описание бункера..."
+            self.bunker_info = await self.ai_client.generate_message([
+                {"role": "system", "content": "You are description generator for a bunker game. Always respond in User language."},
+                {"role": "user", "content": dedent(f"""Сгенерируй краткое описание бункера по его характеристикам. Придумай какие комнаты в нём есть (в зависимости от размера и предметов в нём).
+                    В ответе оставь только само описание, не пиши ничего от своего имени. 
+                    Вот характеристики бункера: 
+                    Размер: {self.size}
+                    Еда: {self.food}
+                    Предметы: {items_str}
+                """)}])
 
         # Генерация изображения бункера
-        if GameData.GENERATE_IMAGE:
+        if GameConfig.GENERATE_IMAGE:
             yield "Генерирую изображение бункера..."
             try:
                 self.image_prompt = await self.ai_client.generate_message([
